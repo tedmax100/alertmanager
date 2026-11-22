@@ -1648,17 +1648,67 @@ flowchart TD
           </pre>
         </div>
 
-        <ol>
-          <li><strong>第一層：Argo CD Application 層級 (<code>spec.destination.namespace</code>)</strong>：
-            宣告目標環境，Argo CD 在 Sync 時將未宣告 namespace 的資源統整歸入。
-          </li>
-          <li><strong>第二層：Kustomize 層級 (<code>kustomization.yaml</code>)</strong>：
-            在各環境 Overlay 透過頂層 <code>namespace: gchat-relay</code> 批次補齊子資源。
-          </li>
-          <li><strong>第三層：Helm 離線編譯腳本 (<code>Makefile</code>)</strong>：
-            透過 <code>helm template ... --namespace cattle-monitoring-system</code> 動態代入 <code>{{ .Release.Namespace }}</code>。
-          </li>
-        </ol>
+        <div class="alert alert-important" style="margin-top: 1rem;">
+          <div class="alert-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            為何 values.yaml 絕不硬編碼 Namespace？
+          </div>
+          <ul>
+            <li><strong>Chart 100% 可移植性</strong>：<code>values.yaml</code> 的職責僅在於提供「應用執行參數」（如探針設定、資源配額、告警規則模組）。若在 <code>values.yaml</code> 中寫死 Namespace，Chart 將無法在 Lab、Stg、Prod 或不同的多租戶環境中重複實例化。</li>
+            <li><strong>Release Context 動態注入</strong>：Helm 範本內部一律使用全域內建變數 <code>{{ .Release.Namespace }}</code>，部署時由外層指令或 GitOps 工具動態注入上下文。</li>
+          </ul>
+        </div>
+
+        <h4>三層式 Namespace 注入流水線詳細實作</h4>
+
+        <p><strong>1. 第一層：Argo CD Application 層級 (<code>spec.destination.namespace</code>)</strong></p>
+        <p>
+          在 <code>*.argocd.yaml</code> 中宣告該 Application 的目標環境。Argo CD 在執行同步（Sync / <code>kubectl apply</code>）時，會強制將所有未宣告 Namespace 的資源統整歸入此目標命名空間：
+        </p>
+        <div class="code-wrapper">
+          <div class="code-header">
+            <span>第一層：Argo CD Application 宣告 (*.argocd.yaml)</span>
+            <button class="code-copy-btn" onclick="copyCode(this)">複製配置</button>
+          </div>
+          <pre>spec:
+  destination:
+    namespace: cattle-monitoring-system   # 強制注入目標命名空間 (或 gchat-relay)
+    name: stg                             # 目標叢集名稱</pre>
+        </div>
+
+        <p><strong>2. 第二層：Kustomize 層級 (<code>kustomization.yaml</code>)</strong></p>
+        <p>
+          在各環境 Overlay 的 <code>kustomization.yaml</code> 中透過頂層宣告，Kustomize 建置時會自動遍歷 <code>resources</code> 下的所有 Deployment、Service、ConfigMap，批次補齊 <code>metadata.namespace</code>：
+        </p>
+        <div class="code-wrapper">
+          <div class="code-header">
+            <span>第二層：Kustomize Overlay 宣告 (kustomization.yaml)</span>
+            <button class="code-copy-btn" onclick="copyCode(this)">複製配置</button>
+          </div>
+          <pre>apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: gchat-relay                    # 批次改寫所有子資源 metadata.namespace
+resources:
+  - ../../base
+  - deployment.yaml</pre>
+        </div>
+
+        <p><strong>3. 第三層：Helm 離線編譯腳本 (<code>Makefile</code>)</strong></p>
+        <p>
+          以 <code>cattle-monitoring-system</code> 底下的 <code>prometheus-blackbox-exporter</code> 為例，透過 Makefile 離線渲染靜態清單時代入命名空間：
+        </p>
+        <div class="code-wrapper">
+          <div class="code-header">
+            <span>第三層：Helm Template 離線渲染 (Makefile)</span>
+            <button class="code-copy-btn" onclick="copyCode(this)">複製指令</button>
+          </div>
+          <pre>helm template prometheus-blackbox-exporter ./charts/prometheus-blackbox-exporter \
+  --namespace cattle-monitoring-system \
+  --values=./values.yaml > prometheus-blackbox-exporter.gen.yaml</pre>
+        </div>
+        <p>
+          <code>values.yaml</code> 專注於黑箱探針的 modules 設定，Namespace 在渲染階段作為參數傳入，輸出為標準的 <code>.gen.yaml</code> 供 Kustomize 與 Argo CD 調度。
+        </p>
 
         <h4>跨命名空間告警轉發實務 (Cross-Namespace Webhook)</h4>
         <p>
