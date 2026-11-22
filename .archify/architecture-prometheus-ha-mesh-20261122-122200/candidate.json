@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Prometheus HA、Operator 與 Alertmanager Mesh 架構拓撲",
+    "locale": "zh-TW",
+    "output": ".archify/architecture-prometheus-ha-mesh-20261122-122200/prometheus-ha-mesh.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/tedmax100/alertmanager.git",
+      "revision": "c5e71f973187627aa6b5d2b55c7051a08bbb0c1c",
+      "link_mode": "local-only"
+    },
+    "views": [
+      {
+        "id": "overview",
+        "label": "整體架構全景",
+        "focus": ["operator", "prom_0", "prom_1", "am_0", "am_1", "rcv_pagerduty", "rcv_slack", "rcv_webhook", "rcv_email", "sre"],
+        "note": "Prometheus HA、Operator、Mesh Pods 與 Receivers 端到端架構拓撲。"
+      },
+      {
+        "id": "ha_push",
+        "label": "Prometheus HA 推送",
+        "focus": ["prom_0", "prom_1", "am_0", "am_1"],
+        "note": "跨可用區雙節點獨立評估告警規則，並各自將告警推送至 Alertmanager Mesh。"
+      },
+      {
+        "id": "mesh_dedup",
+        "label": "Mesh 節點 Gossip 去重",
+        "focus": ["am_0", "am_1"],
+        "note": "Alertmanager 叢集透過 9094 Gossip 協議同步 nflog 去重狀態與 Silences 靜音。"
+      },
+      {
+        "id": "operator_config",
+        "label": "Operator 控制平面",
+        "focus": ["operator", "am_0", "am_1", "sre"],
+        "note": "Prometheus Operator 監聽 CRD 並生成 Secret，觸發 /-/reload 熱加載。"
+      },
+      {
+        "id": "notification_dispatch",
+        "label": "接收端分派整合",
+        "focus": ["am_0", "am_1", "rcv_pagerduty", "rcv_slack", "rcv_webhook", "rcv_email"],
+        "note": "經去重與路由樹匹配後，將告警分派至 PagerDuty、Slack、Webhook 與 Email。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "sre",
+      "type": "frontend",
+      "label": "SRE / 運維工程師",
+      "sublabel": "Web UI & amtool CLI",
+      "icon": "person",
+      "pos": [420, 36],
+      "size": [170, 56]
+    },
+    {
+      "id": "operator",
+      "type": "security",
+      "label": "Prometheus Operator",
+      "sublabel": "CRD 監聽 / Secret 熱加載",
+      "brand": "kubernetes",
+      "tag": "control-plane",
+      "pos": [150, 140],
+      "size": [170, 56]
+    },
+    {
+      "id": "prom_0",
+      "type": "backend",
+      "label": "Prometheus Pod 0",
+      "sublabel": "AZ-a / 獨立評估告警",
+      "brand": "prometheus",
+      "tag": "ha-pair",
+      "pos": [40, 260],
+      "size": [150, 64]
+    },
+    {
+      "id": "prom_1",
+      "type": "backend",
+      "label": "Prometheus Pod 1",
+      "sublabel": "AZ-b / HA 冗餘節點",
+      "brand": "prometheus",
+      "tag": "ha-pair",
+      "pos": [40, 440],
+      "size": [150, 64]
+    },
+    {
+      "id": "am_0",
+      "type": "backend",
+      "label": "Alertmanager Pod 0",
+      "sublabel": ":9093 API / :9094 Gossip",
+      "icon": "active",
+      "tag": "mesh-node",
+      "pos": [420, 252],
+      "size": [170, 80],
+      "sources": [
+        { "path": "cluster/cluster.go", "line": 59, "label": "Peer / Memberlist Gossip" },
+        { "path": "api/v2/api.go", "line": 65, "label": "Alertmanager API v2" }
+      ]
+    },
+    {
+      "id": "am_1",
+      "type": "backend",
+      "label": "Alertmanager Pod 1",
+      "sublabel": ":9093 API / :9094 Gossip",
+      "icon": "active",
+      "tag": "mesh-node",
+      "pos": [420, 432],
+      "size": [170, 80],
+      "sources": [
+        { "path": "cluster/cluster.go", "line": 59, "label": "Peer / Memberlist Gossip" },
+        { "path": "dispatch/dispatch.go", "line": 56, "label": "Dispatcher & 去重" }
+      ]
+    },
+    {
+      "id": "rcv_pagerduty",
+      "type": "external",
+      "label": "PagerDuty",
+      "sublabel": "Events API v2 (Critical)",
+      "brand": "pagerduty",
+      "pos": [820, 140],
+      "size": [150, 60],
+      "sources": [
+        { "path": "notify/pagerduty/pagerduty.go", "line": 46, "label": "PagerDuty Notifier" }
+      ]
+    },
+    {
+      "id": "rcv_slack",
+      "type": "external",
+      "label": "Slack / Teams",
+      "sublabel": "Webhook 頻道通報",
+      "icon": "messagebus",
+      "pos": [820, 240],
+      "size": [150, 60],
+      "sources": [
+        { "path": "notify/slack/types.go", "line": 27, "label": "Slack Notifier" }
+      ]
+    },
+    {
+      "id": "rcv_webhook",
+      "type": "external",
+      "label": "Webhook / 自癒平台",
+      "sublabel": "HTTP POST 事件自動化",
+      "icon": "cloud",
+      "pos": [820, 340],
+      "size": [150, 60],
+      "sources": [
+        { "path": "notify/webhook/webhook.go", "line": 35, "label": "Webhook Notifier" }
+      ]
+    },
+    {
+      "id": "rcv_email",
+      "type": "external",
+      "label": "Email / SMTP",
+      "sublabel": "SMTP 郵件摘要",
+      "icon": "neutral",
+      "pos": [820, 440],
+      "size": [150, 60],
+      "sources": [
+        { "path": "notify/email/email.go", "line": 44, "label": "Email Notifier" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Kubernetes 監控叢集 (Namespace: monitoring)",
+      "wraps": ["operator", "prom_0", "prom_1", "am_0", "am_1"],
+      "pad": 18
+    },
+    {
+      "kind": "security-group",
+      "label": "Prometheus HA Pair (獨立抓取與告警評估)",
+      "wraps": ["prom_0", "prom_1"],
+      "pad": 12
+    },
+    {
+      "kind": "security-group",
+      "label": "Alertmanager Mesh (StatefulSet / :9094 Gossip 同步)",
+      "wraps": ["am_0", "am_1"],
+      "pad": 12
+    }
+  ],
+  "connections": [
+    {
+      "from": "sre",
+      "to": "am_0",
+      "label": ":9093 Web UI & amtool",
+      "variant": "default"
+    },
+    {
+      "from": "operator",
+      "to": "am_0",
+      "label": "Secret 熱加載 /-/reload",
+      "variant": "dashed"
+    },
+    {
+      "from": "prom_0",
+      "to": "am_0",
+      "label": "POST :9093 /api/v2/alerts",
+      "variant": "emphasis"
+    },
+    {
+      "from": "prom_1",
+      "to": "am_1",
+      "label": "POST :9093 /api/v2/alerts",
+      "variant": "emphasis"
+    },
+    {
+      "from": "am_0",
+      "to": "am_1",
+      "label": ":9094 Gossip 互斥與去重同步",
+      "variant": "emphasis"
+    },
+    {
+      "from": "am_0",
+      "to": "rcv_pagerduty",
+      "label": "Events API v2 (Critical)",
+      "variant": "security"
+    },
+    {
+      "from": "am_0",
+      "to": "rcv_slack",
+      "label": "Webhook (頻道通報)",
+      "variant": "default"
+    },
+    {
+      "from": "am_1",
+      "to": "rcv_webhook",
+      "label": "Webhook (自癒觸發)",
+      "variant": "default"
+    },
+    {
+      "from": "am_1",
+      "to": "rcv_email",
+      "label": "SMTP (告警日報)",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Prometheus HA 與雙向獨立推送",
+      "items": [
+        "Prometheus Pod 0 與 Pod 1 分布於不同可用區 (AZ-a / AZ-b)，各自獨立抓取指標並評估告警規則",
+        "雙方無須互相通訊，皆獨立向 Alertmanager Mesh Pods 推送相同的活躍告警 (POST :9093 /api/v2/alerts)",
+        "即使單一 Prometheus 實例故障或網路分區，告警 pipeline 依然不中斷且無單點故障"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Alertmanager Mesh 去重與 Gossip 協議",
+      "items": [
+        "Mesh Pods 透過 9094 (TCP/UDP) 運行 Memberlist Gossip 協議，即時同步叢集狀態",
+        "包含通知日誌 (nflog) 與靜音規則 (Silences) 的全網狀分散式複製",
+        "告警到達時，透過 settle-timeout 與 nflog 鎖機制，由主節點發送通知並廣播，從節點自動抑制重複發送"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Operator 配置驅動與接收端路由",
+      "items": [
+        "Prometheus Operator 監聽 Alertmanager 及 AlertmanagerConfig CRD，自動生成設定檔 Secret",
+        "透過 HTTP POST /-/reload 觸發熱加載，無須重啟 Pod 即可更新路由樹與 Receivers",
+        "根據 severity 與 labels 智慧路由至 PagerDuty、Slack、Webhook 及 Email 等接收端"
+      ]
+    }
+  ]
+}
