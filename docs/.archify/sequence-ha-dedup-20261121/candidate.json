@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Alertmanager HA 階梯延遲去重與 Gossip 廣播時序",
+    "locale": "zh-TW",
+    "output": "alertmanager-ha-sequence.html",
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    { "id": "prom", "type": "cloud", "label": "Prometheus HA", "sublabel": "平行廣播實例" },
+    { "id": "am0", "type": "backend", "label": "Alertmanager 0", "sublabel": "Position 0 (等待 0s)" },
+    { "id": "am1", "type": "backend", "label": "Alertmanager 1", "sublabel": "Position 1 (等待 15s)" },
+    { "id": "am2", "type": "backend", "label": "Alertmanager 2", "sublabel": "Position 2 (等待 30s)" },
+    { "id": "recv", "type": "external", "label": "Slack Notifier", "sublabel": "目標接收端" }
+  ],
+  "segments": [
+    { "from": 150, "to": 245, "label": "1. 多播接收階段 (t=0s)" },
+    { "from": 255, "to": 395, "label": "2. Position 0 優先發送與 Gossip 廣播 (t=0~2s)" },
+    { "from": 405, "to": 545, "label": "3. Position 1 & 2 喚醒去重驗證 (t=15~30s)" }
+  ],
+  "messages": [
+    { "id": "post-am0", "from": "prom", "to": "am0", "y": 165, "label": "POST /api/v2/alerts", "variant": "default" },
+    { "id": "post-am1", "from": "prom", "to": "am1", "y": 195, "label": "POST /api/v2/alerts", "variant": "default" },
+    { "id": "post-am2", "from": "prom", "to": "am2", "y": 225, "label": "POST /api/v2/alerts", "variant": "default" },
+    { "id": "notify-slack", "from": "am0", "to": "recv", "y": 275, "label": "HTTP POST Webhook (發送通知)", "variant": "emphasis" },
+    { "id": "slack-ok", "from": "recv", "to": "am0", "y": 305, "label": "200 OK", "variant": "return" },
+    { "id": "gossip-am1", "from": "am0", "to": "am1", "y": 340, "label": "Gossip 廣播 nflog 發送紀錄 (:9094)", "variant": "dashed" },
+    { "id": "gossip-am2", "from": "am0", "to": "am2", "y": 375, "label": "Gossip 廣播 nflog 發送紀錄 (:9094)", "variant": "dashed" },
+    { "id": "sync-am1", "from": "am1", "to": "am0", "y": 420, "label": "Push-Pull 狀態校驗 (t=15s)", "variant": "default" },
+    { "id": "ack-am1", "from": "am0", "to": "am1", "y": 450, "label": "確認已發送 (DedupStage 靜默攔截)", "variant": "return" },
+    { "id": "sync-am2", "from": "am2", "to": "am0", "y": 490, "label": "Push-Pull 狀態校驗 (t=30s)", "variant": "default" },
+    { "id": "ack-am2", "from": "am0", "to": "am2", "y": 520, "label": "確認已發送 (DedupStage 靜默攔截)", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "prom", "from": 160, "to": 235, "type": "cloud" },
+    { "participant": "am0", "from": 165, "to": 530, "type": "backend" },
+    { "participant": "am1", "from": 195, "to": 460, "type": "backend" },
+    { "participant": "am2", "from": 225, "to": 530, "type": "backend" },
+    { "participant": "recv", "from": 275, "to": 310, "type": "external" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "無中心階梯等待演算法",
+      "items": [
+        "AM-0 (Position 0) 等待時間為 0s，檢查本地 nflog 無紀錄後立即向 Slack 發送",
+        "發送成功後立即於 SetNotifiesStage 寫入 nflog 並透過 Gossip UDP/TCP:9094 廣播",
+        "AM-1 (等待 15s) 與 AM-2 (等待 30s) 喚醒後查驗本地日誌，發現已發送即靜默丟棄"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Fail-Open 容錯接替",
+      "items": [
+        "若 AM-0 在前 15s 內發生當機或外部網路發送失敗，將無法廣播 nflog 紀錄",
+        "AM-1 在 15s 喚醒時發現 nflog 仍無紀錄，將無縫接替發送，達成 At-least-once 保證",
+        "網路分區時兩邊各有一台成為 Position 0 獨立發送，網路修復後自動合併"
+      ]
+    }
+  ]
+}

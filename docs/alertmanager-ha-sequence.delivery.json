@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "514866ca-f3bf-4b40-b408-41661baada46",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "/home/nathan/Project/alertmanager/docs/.archify/sequence-ha-dedup-20261121/candidate.json",
+  "output": "/home/nathan/Project/alertmanager/docs/alertmanager-ha-sequence.html",
+  "specification": {
+    "sha256": "b048b0a0914c1b105dc6673da4e9c0dfcd5b533764ba35baf5d709d4dca59d8c",
+    "bytes": 3791
+  },
+  "artifact": {
+    "sha256": "d63a6b896b72c4fd0b122483b1a401d25b42a1874155a8b46a92c8e65e0069e7",
+    "bytes": 836845
+  }
+}

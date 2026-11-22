@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Alertmanager 核心架構與 Rancher Monitoring 整合",
+    "locale": "zh-TW",
+    "output": "alertmanager-architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "prom-ha",
+      "type": "cloud",
+      "label": "Prometheus HA",
+      "sublabel": "Prometheus Pods",
+      "brand": "prometheus",
+      "pos": [40, 230],
+      "size": [150, 65],
+      "tag": "Alert Ingestion"
+    },
+    {
+      "id": "prom-op",
+      "type": "security",
+      "label": "Prometheus Operator",
+      "sublabel": "CRD Controller",
+      "brand": "kubernetes",
+      "pos": [40, 70],
+      "size": [150, 65],
+      "tag": "Operator Pattern"
+    },
+    {
+      "id": "cfg-reload",
+      "type": "security",
+      "label": "config-reloader",
+      "sublabel": "Sidecar Watcher",
+      "pos": [270, 70],
+      "size": [150, 65],
+      "tag": "Hot Reload"
+    },
+    {
+      "id": "am-api",
+      "type": "backend",
+      "label": "Alertmanager API",
+      "sublabel": ":9093 /api/v2/alerts",
+      "pos": [270, 230],
+      "size": [150, 65],
+      "tag": "provider/mem"
+    },
+    {
+      "id": "am-dispatch",
+      "type": "backend",
+      "label": "Dispatcher",
+      "sublabel": "Route Tree & DFS Matcher",
+      "pos": [500, 230],
+      "size": [160, 65],
+      "tag": "dispatch.Dispatcher"
+    },
+    {
+      "id": "am-group",
+      "type": "backend",
+      "label": "Aggregation Group",
+      "sublabel": "group_wait / interval",
+      "pos": [740, 230],
+      "size": [150, 65],
+      "tag": "aggrGroup"
+    },
+    {
+      "id": "am-cluster",
+      "type": "database",
+      "label": "Gossip Cluster & nflog",
+      "sublabel": ":9094 Memberlist Mesh",
+      "pos": [620, 390],
+      "size": [160, 65],
+      "tag": "HA Dedup State"
+    },
+    {
+      "id": "am-pipeline",
+      "type": "backend",
+      "label": "Notify Pipeline",
+      "sublabel": "Inhibit / Silence / Dedup",
+      "pos": [970, 230],
+      "size": [150, 65],
+      "tag": "notify.Stage"
+    },
+    {
+      "id": "recv-pd",
+      "type": "external",
+      "label": "PagerDuty",
+      "sublabel": "P1 Critical On-Call",
+      "pos": [1210, 100],
+      "size": [140, 60]
+    },
+    {
+      "id": "recv-slack",
+      "type": "external",
+      "label": "Slack ChatOps",
+      "sublabel": "#alerts-general / sre",
+      "pos": [1210, 230],
+      "size": [140, 60]
+    },
+    {
+      "id": "recv-webhook",
+      "type": "external",
+      "label": "Webhook Gateway",
+      "sublabel": "Ops Event System",
+      "pos": [1210, 360],
+      "size": [140, 60]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Rancher Monitoring (cattle-monitoring-system)",
+      "wraps": ["prom-op", "prom-ha", "cfg-reload", "am-api", "am-dispatch", "am-group", "am-cluster", "am-pipeline"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "prom-to-api",
+      "from": "prom-ha",
+      "to": "am-api",
+      "label": "POST /alerts",
+      "variant": "emphasis"
+    },
+    {
+      "id": "op-to-reload",
+      "from": "prom-op",
+      "to": "cfg-reload",
+      "label": "mount Secret",
+      "variant": "dashed"
+    },
+    {
+      "id": "reload-to-api",
+      "from": "cfg-reload",
+      "to": "am-api",
+      "label": "POST /-/reload",
+      "variant": "security"
+    },
+    {
+      "id": "api-to-dispatch",
+      "from": "am-api",
+      "to": "am-dispatch",
+      "label": "routeAlert()"
+    },
+    {
+      "id": "dispatch-to-group",
+      "from": "am-dispatch",
+      "to": "am-group",
+      "label": "groupAlert()"
+    },
+    {
+      "id": "group-to-pipeline",
+      "from": "am-group",
+      "to": "am-pipeline",
+      "label": "flush() batch"
+    },
+    {
+      "id": "group-to-cluster",
+      "from": "am-group",
+      "to": "am-cluster",
+      "label": "sync state",
+      "variant": "dashed"
+    },
+    {
+      "id": "cluster-to-pipeline",
+      "from": "am-cluster",
+      "to": "am-pipeline",
+      "label": "nflog check",
+      "variant": "dashed"
+    },
+    {
+      "id": "pipe-to-pd",
+      "from": "am-pipeline",
+      "to": "recv-pd",
+      "label": "P1 critical"
+    },
+    {
+      "id": "pipe-to-slack",
+      "from": "am-pipeline",
+      "to": "recv-slack",
+      "label": "ChatOps"
+    },
+    {
+      "id": "pipe-to-webhook",
+      "from": "am-pipeline",
+      "to": "recv-webhook",
+      "label": "HTTP event"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Ingestion & Routing",
+      "items": [
+        "Prometheus Server 透過 /api/v2/alerts 周期性推送活躍與恢復告警",
+        "Dispatcher 透過 DFS 深度優先遍歷 Route Tree，支援 continue: true 多路廣播",
+        "依據 group_by 標籤計算唯一 GroupKey，將告警收斂進專屬 aggrGroup"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Timers & Dedup",
+      "items": [
+        "group_wait 控制新群組聚合緩衝，group_interval 控制增量更新頻率",
+        "ClusterWaitStage 依節點哈希順序偏置等待時間，先發者廣播 nflog",
+        "DedupStage 比對 nflog 發送紀錄，相同告警集合在 repeat_interval 內自動靜默"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Rancher Integration",
+      "items": [
+        "Prometheus Operator 監聽 AlertmanagerConfig CRD 並編譯進 Secret",
+        "config-reloader sidecar 偵測 Secret 變更並對 Alertmanager 發起熱重載",
+        "業務命名空間支援宣告式 CRD，自動注入 namespace 隔離標籤"
+      ]
+    }
+  ]
+}

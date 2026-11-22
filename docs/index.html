@@ -1,0 +1,2088 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prometheus Alertmanager 核心架構、HA 叢集實作與 Rancher Monitoring 整合知識庫</title>
+  <meta name="description" content="深入解析 Prometheus Alertmanager 核心模組、HashiCorp Memberlist Gossip HA 叢集、階梯延遲去重演算法、SUSE Rancher Monitoring v2 多租戶架構與 GitOps 實踐指南。">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20width=%2232%22%20height=%2232%22><text y=%2224%22 font-size=%2222%22>🔥</text></svg>">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <!-- Mermaid.js for Diagrams -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+
+  <style>
+    :root {
+      --font-sans: 'Inter', 'Noto Sans TC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      
+      /* Dark Theme (Default) */
+      --bg-body: #0b0f19;
+      --bg-surface: #111827;
+      --bg-surface-elevated: #1f2937;
+      --bg-surface-hover: #283548;
+      --bg-code: #0f141f;
+      --border-color: #1f2937;
+      --border-subtle: #2d3748;
+      --border-highlight: #3b82f6;
+      
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      
+      --brand-orange: #ea580c;
+      --brand-orange-light: #f97316;
+      --brand-blue: #3b82f6;
+      --brand-blue-glow: rgba(59, 130, 246, 0.15);
+      --brand-green: #10b981;
+      --brand-purple: #8b5cf6;
+      
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+      --shadow-glow: 0 0 25px rgba(249, 115, 22, 0.2);
+    }
+
+    html.light {
+      --bg-body: #f8fafc;
+      --bg-surface: #ffffff;
+      --bg-surface-elevated: #f1f5f9;
+      --bg-surface-hover: #e2e8f0;
+      --bg-code: #f1f5f9;
+      --border-color: #e2e8f0;
+      --border-subtle: #cbd5e1;
+      --border-highlight: #2563eb;
+      
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dim: #94a3b8;
+      
+      --brand-orange: #ea580c;
+      --brand-orange-light: #f97316;
+      --brand-blue: #2563eb;
+      --brand-blue-glow: rgba(37, 99, 235, 0.1);
+      --brand-green: #059669;
+      --brand-purple: #7c3aed;
+      
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+      --shadow-glow: 0 0 25px rgba(234, 88, 12, 0.15);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-body);
+      color: var(--text-main);
+      line-height: 1.7;
+      transition: background-color 0.25s, color 0.25s;
+      overflow-x: hidden;
+    }
+
+    /* Links & Buttons */
+    a { color: var(--brand-blue); text-decoration: none; transition: color 0.2s; }
+    a:hover { color: var(--brand-orange-light); }
+    
+    /* Navbar */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    html.light .navbar { background: rgba(255, 255, 255, 0.88); }
+    
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-weight: 700;
+      font-size: 1.15rem;
+      color: var(--text-main);
+    }
+    .nav-brand-badge {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      background: rgba(234, 88, 12, 0.2);
+      color: var(--brand-orange-light);
+      font-weight: 600;
+      border: 1px solid rgba(234, 88, 12, 0.3);
+    }
+    .nav-items {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .nav-link {
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      font-weight: 500;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .nav-link:hover {
+      color: var(--text-main);
+      background: var(--bg-surface-elevated);
+    }
+    .nav-link.active-archify {
+      color: var(--brand-orange-light);
+      background: rgba(249, 115, 22, 0.12);
+      font-weight: 600;
+    }
+    .btn-icon {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      border-radius: 8px;
+      padding: 0.5rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    .btn-icon:hover {
+      color: var(--text-main);
+      background: var(--bg-surface-hover);
+      border-color: var(--border-subtle);
+    }
+
+    /* Layout */
+    .layout-container {
+      display: flex;
+      max-width: 1600px;
+      margin: 0 auto;
+      min-height: calc(100vh - 64px);
+    }
+    
+    /* Left Sidebar */
+    .sidebar {
+      width: 290px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--border-color);
+      padding: 1.5rem 1rem 3rem 1.25rem;
+      position: sticky;
+      top: 64px;
+      height: calc(100vh - 64px);
+      overflow-y: auto;
+      background: var(--bg-body);
+    }
+    .sidebar-search {
+      margin-bottom: 1.25rem;
+      position: relative;
+    }
+    .sidebar-search input {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem 0.5rem 2.2rem;
+      font-size: 0.85rem;
+      color: var(--text-main);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .sidebar-search input:focus {
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 2px var(--brand-blue-glow);
+    }
+    .sidebar-search svg {
+      position: absolute;
+      left: 0.75rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+    }
+    .sidebar-group {
+      margin-bottom: 1.5rem;
+    }
+    .sidebar-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      margin-bottom: 0.5rem;
+      padding-left: 0.5rem;
+    }
+    .sidebar-link {
+      display: block;
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+      transition: all 0.15s;
+      margin-bottom: 0.15rem;
+    }
+    .sidebar-link:hover {
+      color: var(--text-main);
+      background: var(--bg-surface);
+      transform: translateX(2px);
+    }
+    .sidebar-link.active {
+      color: var(--brand-orange-light);
+      background: rgba(249, 115, 22, 0.12);
+      font-weight: 600;
+      border-left: 3px solid var(--brand-orange-light);
+    }
+
+    /* Main Content */
+    .content-area {
+      flex: 1;
+      min-width: 0;
+      padding: 2.5rem 3.5rem 5rem 3.5rem;
+    }
+    @media (max-width: 1200px) {
+      .content-area { padding: 2rem 2rem 4rem 2rem; }
+    }
+    @media (max-width: 860px) {
+      .sidebar { display: none; }
+      .content-area { padding: 1.5rem 1rem 3rem 1rem; }
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 3rem 0 2.5rem 0;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 3rem;
+      position: relative;
+    }
+    .hero-badge-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+    }
+    .badge-primary {
+      background: rgba(234, 88, 12, 0.15);
+      color: var(--brand-orange-light);
+      border-color: rgba(234, 88, 12, 0.3);
+    }
+    .badge-blue {
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--brand-blue);
+      border-color: rgba(59, 130, 246, 0.3);
+    }
+    .badge-green {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--brand-green);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+    .hero h1 {
+      font-size: 2.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #f97316 0%, #fb923c 25%, #60a5fa 75%, #3b82f6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    html.light .hero h1 {
+      background: linear-gradient(135deg, #c2410c 0%, #ea580c 25%, #2563eb 75%, #1d4ed8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.12rem;
+      color: var(--text-muted);
+      max-width: 950px;
+      line-height: 1.7;
+      margin-bottom: 2rem;
+    }
+    
+    /* Archify Hub Banner Section */
+    .archify-hub {
+      background: linear-gradient(180deg, rgba(31, 41, 55, 0.6) 0%, rgba(17, 24, 39, 0.9) 100%);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 1.75rem;
+      margin-bottom: 3.5rem;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+      overflow: hidden;
+    }
+    html.light .archify-hub {
+      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      border-color: #e2e8f0;
+      box-shadow: 0 4px 20px -2px rgba(0,0,0,0.06);
+    }
+    .archify-hub::before {
+      content: "";
+      position: absolute;
+      top: 0; right: 0; width: 350px; height: 350px;
+      background: radial-gradient(circle, rgba(249, 115, 22, 0.12) 0%, rgba(0,0,0,0) 70%);
+      pointer-events: none;
+    }
+    .archify-hub-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .archify-hub-title {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .archify-hub-title svg { color: var(--brand-orange-light); }
+    .archify-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.25rem;
+    }
+    .archify-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.25s ease;
+      position: relative;
+    }
+    .archify-card:hover {
+      border-color: var(--brand-orange-light);
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-glow);
+    }
+    .archify-card-top {
+      margin-bottom: 1rem;
+    }
+    .archify-card-badges {
+      display: flex;
+      gap: 0.4rem;
+      margin-bottom: 0.65rem;
+    }
+    .archify-card-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 0.4rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .archify-card-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+    .archify-card-actions {
+      display: flex;
+      gap: 0.6rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border-color);
+    }
+    .btn-action-primary {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+      color: #ffffff !important;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.5rem 0.85rem;
+      border-radius: 6px;
+      transition: opacity 0.2s, transform 0.15s;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-action-primary:hover {
+      opacity: 0.92;
+      transform: translateY(-1px);
+    }
+    .btn-action-secondary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      background: var(--bg-surface-elevated);
+      color: var(--text-main) !important;
+      border: 1px solid var(--border-subtle);
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 0.5rem 0.85rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-action-secondary:hover {
+      background: var(--bg-surface-hover);
+      border-color: var(--brand-blue);
+    }
+
+    /* Inline Archify Callout Banner */
+    .archify-inline-callout {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.25rem;
+      background: rgba(249, 115, 22, 0.08);
+      border: 1px solid rgba(249, 115, 22, 0.35);
+      border-left: 4px solid var(--brand-orange-light);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 1.5rem 0;
+      flex-wrap: wrap;
+    }
+    .archify-inline-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .archify-inline-info svg {
+      color: var(--brand-orange-light);
+      flex-shrink: 0;
+    }
+    .archify-inline-text h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 0.15rem;
+    }
+    .archify-inline-text p {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin: 0;
+    }
+    .archify-inline-btns {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    /* Content Typography */
+    h2 {
+      font-size: 1.85rem;
+      font-weight: 800;
+      color: var(--text-main);
+      margin: 3.5rem 0 1.25rem 0;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      scroll-margin-top: 80px;
+    }
+    h2 svg { color: var(--brand-orange-light); }
+    h3 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin: 2.25rem 0 0.85rem 0;
+      scroll-margin-top: 80px;
+    }
+    h4 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin: 1.5rem 0 0.5rem 0;
+      scroll-margin-top: 80px;
+    }
+    p { margin-bottom: 1.15rem; color: var(--text-muted); font-size: 0.98rem; }
+    strong { color: var(--text-main); }
+    ul, ol {
+      margin: 0.75rem 0 1.25rem 1.5rem;
+      color: var(--text-muted);
+    }
+    li { margin-bottom: 0.4rem; }
+
+    /* Tables */
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+      margin: 1.5rem 0;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-surface);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.88rem;
+    }
+    th {
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      font-weight: 600;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-color);
+      white-space: nowrap;
+    }
+    td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-muted);
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--bg-surface-hover); }
+
+    /* Code Blocks & Pre */
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.86em;
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      background: var(--bg-code);
+      border: 1px solid var(--border-subtle);
+      color: var(--brand-orange-light);
+    }
+    .code-wrapper {
+      position: relative;
+      margin: 1.25rem 0 1.75rem 0;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-code);
+      overflow: hidden;
+    }
+    .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 1rem;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+    .code-copy-btn {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      border-radius: 4px;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.72rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      transition: all 0.2s;
+    }
+    .code-copy-btn:hover {
+      background: var(--bg-surface-hover);
+      color: var(--text-main);
+    }
+    pre {
+      padding: 1rem;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 0.86rem;
+      line-height: 1.6;
+      color: #e2e8f0;
+      margin: 0;
+    }
+    html.light pre {
+      color: #1e293b;
+    }
+
+    /* Alerts / Callouts */
+    .alert {
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 1.25rem 0;
+      border-left: 4px solid;
+      background: var(--bg-surface);
+      font-size: 0.92rem;
+    }
+    .alert-title {
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin-bottom: 0.4rem;
+    }
+    .alert-note {
+      border-color: var(--brand-blue);
+      background: rgba(59, 130, 246, 0.08);
+    }
+    .alert-note .alert-title { color: var(--brand-blue); }
+    .alert-important {
+      border-color: var(--brand-orange-light);
+      background: rgba(249, 115, 22, 0.08);
+    }
+    .alert-important .alert-title { color: var(--brand-orange-light); }
+    .alert-caution {
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.08);
+    }
+    .alert-caution .alert-title { color: #ef4444; }
+
+    /* Mermaid Diagrams Container */
+    .mermaid-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+
+    /* Modal for Archify Interactive Pages */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.82);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    .modal-overlay.active {
+      display: flex;
+      opacity: 1;
+    }
+    .modal-window {
+      width: 95vw;
+      height: 92vh;
+      max-width: 1500px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+      animation: modalScaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes modalScaleUp {
+      from { transform: scale(0.96); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .modal-header {
+      height: 52px;
+      background: var(--bg-surface-elevated);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1rem;
+    }
+    .modal-title-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .modal-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .modal-body {
+      flex: 1;
+      width: 100%;
+      height: calc(100% - 52px);
+      background: #000;
+      position: relative;
+    }
+    .modal-iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-color);
+      padding: 3rem 1.5rem;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 0.88rem;
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--brand-orange-light); }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--brand-orange-light);">
+        <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>
+      </svg>
+      <span>Alertmanager Architecture Hub</span>
+      <span class="nav-brand-badge">HA & Rancher</span>
+    </div>
+
+    <div class="nav-items">
+      <a href="#archify-showcase" class="nav-link active-archify">✨ Archify 互動架構</a>
+      <a href="#overview" class="nav-link">全景概覽</a>
+      <a href="#ha-cluster" class="nav-link">HA 階梯去重</a>
+      <a href="#rancher-integration" class="nav-link">Rancher 整合</a>
+      <a href="#manifests" class="nav-link">部署清單</a>
+      <a href="#troubleshooting" class="nav-link">排錯指南</a>
+
+      <button id="theme-toggle" class="btn-icon" title="切換深色 / 淺色主題">
+        <svg id="theme-icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        <svg id="theme-icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+      </button>
+
+      <a href="https://github.com/prometheus/alertmanager" target="_blank" class="btn-icon" title="檢視 GitHub 倉庫">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+      </a>
+    </div>
+  </nav>
+
+  <!-- Main Container -->
+  <div class="layout-container">
+    
+    <!-- Left Navigation Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="doc-search" placeholder="搜尋章節關鍵字 (Gossip, CRD...)" onkeyup="filterNav()">
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title">互動式視覺化套件 (Archify)</div>
+        <a href="javascript:void(0)" onclick="openArchifyModal('alertmanager-rancher-explainer.html', '單頁互動知識總覽 · Archify Explainer')" class="sidebar-link">🌟 單頁知識總覽 (Explainer)</a>
+        <a href="javascript:void(0)" onclick="openArchifyModal('alertmanager-architecture.html', '系統架構互動圖 · Architecture')" class="sidebar-link">📐 系統拓撲圖 (Architecture)</a>
+        <a href="javascript:void(0)" onclick="openArchifyModal('alertmanager-ha-sequence.html', 'HA 階梯等待時序圖 · Sequence')" class="sidebar-link">⏱️ HA 階梯時序 (Sequence)</a>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title">技術指南章節導覽</div>
+        <a href="#overview" class="sidebar-link">1. 架構全景概覽</a>
+        <a href="#core-modules" class="sidebar-link">2. 核心模組與內部實作</a>
+        <a href="#sub-2-1" class="sidebar-link" style="padding-left: 1.25rem;">2.1 告警接收與儲存</a>
+        <a href="#sub-2-2" class="sidebar-link" style="padding-left: 1.25rem;">2.2 路由樹與匹配器機制</a>
+        <a href="#sub-2-3" class="sidebar-link" style="padding-left: 1.25rem;">2.3 告警分組與三大時間參數</a>
+        <a href="#sub-2-4" class="sidebar-link" style="padding-left: 1.25rem;">2.4 通知管線與去重階段</a>
+        <a href="#ha-cluster" class="sidebar-link">3. HA 叢集與階梯去重深入剖析</a>
+        <a href="#sub-3-1" class="sidebar-link" style="padding-left: 1.25rem;">3.1 CAP 與 Fail-Open 原則</a>
+        <a href="#sub-3-2" class="sidebar-link" style="padding-left: 1.25rem;">3.2 HashiCorp Memberlist Gossip</a>
+        <a href="#sub-3-3" class="sidebar-link" style="padding-left: 1.25rem;">3.3 狀態同步與 CRDT 合併</a>
+        <a href="#sub-3-4" class="sidebar-link" style="padding-left: 1.25rem;">3.4 階梯延遲去重演算法</a>
+        <a href="#sub-3-5" class="sidebar-link" style="padding-left: 1.25rem;">3.5 狀態沉澱機制</a>
+        <a href="#sub-3-6" class="sidebar-link" style="padding-left: 1.25rem;">3.6 網路分區與腦裂</a>
+        <a href="#sub-3-7" class="sidebar-link" style="padding-left: 1.25rem;">3.7 持久化快照與 PVC</a>
+        <a href="#sub-3-8" class="sidebar-link" style="padding-left: 1.25rem;">3.8 嚴禁透過負載均衡器直連</a>
+        <a href="#rancher-integration" class="sidebar-link">4. Rancher Monitoring v2 整合</a>
+        <a href="#sub-4-1" class="sidebar-link" style="padding-left: 1.25rem;">4.1 核心元件與 K8s 資源</a>
+        <a href="#sub-4-2" class="sidebar-link" style="padding-left: 1.25rem;">4.2 命名空間隔離機制</a>
+        <a href="#sub-4-3" class="sidebar-link" style="padding-left: 1.25rem;">4.3 GitOps 三層注入層級</a>
+        <a href="#manifests" class="sidebar-link">5. 生產環境部署清單</a>
+        <a href="#sub-5-1" class="sidebar-link" style="padding-left: 1.25rem;">5.1 全域 AlertmanagerConfig</a>
+        <a href="#sub-5-2" class="sidebar-link" style="padding-left: 1.25rem;">5.2 業務專屬 AlertmanagerConfig</a>
+        <a href="#troubleshooting" class="sidebar-link">6. 維運排錯與指標監控</a>
+        <a href="#sub-6-1" class="sidebar-link" style="padding-left: 1.25rem;">6.1 告警重複接收四大排查點</a>
+        <a href="#sub-6-2" class="sidebar-link" style="padding-left: 1.25rem;">6.2 熱重載與診斷工具流</a>
+        <a href="#sub-6-3" class="sidebar-link" style="padding-left: 1.25rem;">6.3 關鍵監控指標</a>
+        <a href="#decision-matrix" class="sidebar-link">7. 架構決策與實施建議矩陣</a>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="content-area">
+
+      <!-- Hero Header -->
+      <section class="hero">
+        <div class="hero-badge-group">
+          <span class="badge badge-primary">Prometheus Alertmanager v0.27+</span>
+          <span class="badge badge-blue">SUSE Rancher Monitoring v2</span>
+          <span class="badge badge-green">Memberlist Gossip Mesh</span>
+          <span class="badge">GitOps (Argo CD + Kustomize + Helm)</span>
+        </div>
+        <h1>Alertmanager 核心架構、HA 去重與 Rancher 整合知識庫</h1>
+        <p>
+          本站彙整了 Prometheus Alertmanager 的深層內部機制，包含 <code>dispatch/</code> 路由樹遍歷、<code>aggrGroup</code> 時間狀態機、HashiCorp Memberlist Gossip 協議、基於節點位置的階梯延遲去重演算法，以及在 Kubernetes / Rancher Monitoring (v2) 上的多租戶 CRD 隔離與 GitOps 實踐架構。
+        </p>
+      </section>
+
+      <!-- Archify Interactive Visual Suite Section -->
+      <section id="archify-showcase" class="archify-hub">
+        <div class="archify-hub-header">
+          <div class="archify-hub-title">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            <span>Archify 互動式視覺化套件 (Interactive Visual Hub)</span>
+          </div>
+          <span class="badge badge-primary">獨立單頁 HTML · 支援深淺色與 SVG 匯出</span>
+        </div>
+
+        <div class="archify-cards-grid">
+          <!-- Card 1: Explainer -->
+          <div class="archify-card">
+            <div class="archify-card-top">
+              <div class="archify-card-badges">
+                <span class="badge badge-primary">單頁知識精華</span>
+                <span class="badge">互動工作流</span>
+              </div>
+              <div class="archify-card-title">
+                <span>📋</span>
+                <span>單頁互動知識總覽 (Explainer)</span>
+              </div>
+              <p class="archify-card-desc">
+                整合核心結論、端到端告警處理工作流、階梯時序動態圖、架構決策矩陣與生產上線檢核表，提供沉浸式單頁導覽。
+              </p>
+            </div>
+            <div class="archify-card-actions">
+              <a href="./alertmanager-rancher-explainer.html" target="_blank" class="btn-action-primary">
+                新分頁開啟 ↗
+              </a>
+              <button onclick="openArchifyModal('alertmanager-rancher-explainer.html', '單頁互動知識總覽 · Archify Explainer')" class="btn-action-secondary">
+                🔍 內嵌預覽
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 2: Architecture -->
+          <div class="archify-card">
+            <div class="archify-card-top">
+              <div class="archify-card-badges">
+                <span class="badge badge-blue">拓撲全景</span>
+                <span class="badge">Rancher v2</span>
+              </div>
+              <div class="archify-card-title">
+                <span>📐</span>
+                <span>系統架構互動拓撲圖 (Architecture)</span>
+              </div>
+              <p class="archify-card-desc">
+                Prometheus HA 直連多播、Prometheus Operator、config-reloader sidecar、Gossip Mesh (:9094)、Receiver 分流管線之動態高階架構圖。
+              </p>
+            </div>
+            <div class="archify-card-actions">
+              <a href="./alertmanager-architecture.html" target="_blank" class="btn-action-primary">
+                新分頁開啟 ↗
+              </a>
+              <button onclick="openArchifyModal('alertmanager-architecture.html', '系統架構互動圖 · Architecture')" class="btn-action-secondary">
+                🔍 內嵌預覽
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 3: Sequence -->
+          <div class="archify-card">
+            <div class="archify-card-top">
+              <div class="archify-card-badges">
+                <span class="badge badge-green">去重時序</span>
+                <span class="badge">演算法動態</span>
+              </div>
+              <div class="archify-card-title">
+                <span>⏱️</span>
+                <span>HA 階梯等待去重時序圖 (Sequence)</span>
+              </div>
+              <p class="archify-card-desc">
+                以毫秒級步進檢視 Position 排序、階梯偏置睡眠延遲 ($Position 	imes 15s$)、本地 <code>nflog</code> 攔截以及節點故障時的自動轉移接手流程。
+              </p>
+            </div>
+            <div class="archify-card-actions">
+              <a href="./alertmanager-ha-sequence.html" target="_blank" class="btn-action-primary">
+                新分頁開啟 ↗
+              </a>
+              <button onclick="openArchifyModal('alertmanager-ha-sequence.html', 'HA 階梯等待時序圖 · Sequence')" class="btn-action-secondary">
+                🔍 內嵌預覽
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 1: Overview -->
+      <section id="overview">
+        <h2>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          1. 架構全景概覽 (System Overview)
+        </h2>
+        <p>
+          在雲原生與微服務監控體系中，<strong>Prometheus</strong> 專注於指標採集與規則評估（Scraping & Rule Evaluation），而 <strong>Alertmanager</strong> 則專職負責告警事件的後續生命週期管理。
+        </p>
+        <p>
+          當 Prometheus 評估出處於 <code>firing</code> 或 <code>resolved</code> 狀態的告警時，會透過 HTTP POST 推送給 Alertmanager。Alertmanager 在接收到原始告警後，承擔以下核心職責：
+        </p>
+        <ol>
+          <li><strong>去重 (Deduplication)</strong>：多個 HA 節點發送的相同告警僅保留一份。</li>
+          <li><strong>分組 (Grouping)</strong>：將屬於相同維度（如同一服務、集群）的相關告警打包為單一通知，防止告警風暴（Alert Storm）。</li>
+          <li><strong>抑制 (Inhibition)</strong>：根據根因關係（如主機宕機 <code>NodeDown</code>），自動過濾衍生告警（如該主機上的 Pod 異常）。</li>
+          <li><strong>靜音 (Silencing)</strong>：在維護窗口或已知問題期間，基於標籤規則與時間範圍阻斷通知。</li>
+          <li><strong>路由 (Routing)</strong>：透過樹狀路由層級（Route Tree）與匹配器（Matcher），精準將告警分派至 Slack、PagerDuty、Webhook、Email 等接收端。</li>
+          <li><strong>無中心高可用叢集 (HA Gossip Mesh)</strong>：各實例間透過 Gossip 協議互聯，同步通知狀態（<code>nflog</code>）與靜音資訊，杜絕單點故障（SPOF）。</li>
+        </ol>
+
+        <!-- Inline Archify Callout 1 -->
+        <div class="archify-inline-callout">
+          <div class="archify-inline-info">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+            <div class="archify-inline-text">
+              <h4>互動式系統架構圖 (Archify Architecture)</h4>
+              <p>可縮放、平移並檢視 Prometheus HA、Operator、Mesh Pods 與 Receivers 的拓撲關係。</p>
+            </div>
+          </div>
+          <div class="archify-inline-btns">
+            <a href="./alertmanager-architecture.html" target="_blank" class="btn-action-primary">在新分頁開啟 ↗</a>
+            <button onclick="openArchifyModal('alertmanager-architecture.html', '系統架構互動圖 · Architecture')" class="btn-action-secondary">🔍 快速預覽</button>
+          </div>
+        </div>
+
+        <div class="mermaid-box">
+          <pre class="mermaid">
+flowchart TD
+    subgraph Prometheus["Prometheus 實例群 (HA Pair)"]
+        P1["Prometheus Pod 0"]
+        P2["Prometheus Pod 1"]
+    end
+
+    subgraph RancherMonitoring["Rancher Monitoring (cattle-monitoring-system)"]
+        SVC["Alertmanager Service (:9093)"]
+        subgraph AM_Cluster["Alertmanager StatefulSet (HA Mesh)"]
+            AM1["Alertmanager Pod 0<br/>(Position 0)"]
+            AM2["Alertmanager Pod 1<br/>(Position 1)"]
+            AM3["Alertmanager Pod 2<br/>(Position 2)"]
+            AM1 <-->|Gossip :9094| AM2
+            AM2 <-->|Gossip :9094| AM3
+            AM3 <-->|Gossip :9094| AM1
+        end
+    end
+
+    subgraph Destinations["Notification Receivers"]
+        Slack["Slack ChatOps"]
+        PD["PagerDuty On-Call"]
+        Webhook["Webhook Event Gateway"]
+        Email["Email / Mail Server"]
+    end
+
+    P1 -->|POST /api/v2/alerts (多播直連)| AM1
+    P1 -->|POST /api/v2/alerts (多播直連)| AM2
+    P1 -->|POST /api/v2/alerts (多播直連)| AM3
+
+    P2 -->|POST /api/v2/alerts (多播直連)| AM1
+    P2 -->|POST /api/v2/alerts (多播直連)| AM2
+    P2 -->|POST /api/v2/alerts (多播直連)| AM3
+
+    AM1 -.->|0s 立即發送並廣播 nflog| Slack
+    AM2 -.->|15s 等待後靜默去重| PD
+    AM3 -.->|30s 等待後靜默去重| Webhook
+    AM1 -.->|0s 立即發送並廣播 nflog| Email
+          </pre>
+        </div>
+      </section>
+
+      <!-- Section 2: Core Modules -->
+      <section id="core-modules">
+        <h2>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          2. Alertmanager 核心模組與內部實作解析
+        </h2>
+        <p>
+          從 Alertmanager 官方 Go 源碼目錄劃分，可精確對應至以下核心子系統：
+        </p>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>源碼目錄</th>
+                <th>核心職責與代表型別</th>
+                <th>設計架構與關鍵演算法</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>cmd/alertmanager/</code></td>
+                <td>CLI 命令列入口、旗標解析</td>
+                <td>輕量封裝，解析 <code>--config.file</code>、<code>--cluster.*</code> 旗標後呼叫 <code>app/</code>。</td>
+              </tr>
+              <tr>
+                <td><code>app/</code></td>
+                <td>嵌入式運行時生命週期 (Runtime Lifecycle)</td>
+                <td>擁有啟動 (<code>Start</code>)、停止 (<code>Stop</code>)、熱重載 (<code>Reload</code>)、叢集等待 (<code>clusterWait</code>) 與 HTTP 伺服器掛載。</td>
+              </tr>
+              <tr>
+                <td><code>api/v2/</code></td>
+                <td>OpenAPI RESTful API (v2)</td>
+                <td>接收 Prometheus 推送之告警陣列、查詢/建立 Silence 規則、查詢叢集成員狀態。</td>
+              </tr>
+              <tr>
+                <td><code>provider/mem/</code></td>
+                <td>純記憶體告警儲存庫 (In-memory Store)</td>
+                <td>以告警標籤指紋 (Fingerprint) 為 Key 索引，背景協程定時回收過期已解決告警。</td>
+              </tr>
+              <tr>
+                <td><code>dispatch/</code></td>
+                <td>路由樹遍歷、分組狀態機 (<code>aggrGroup</code>)</td>
+                <td>深度優先 (DFS) 遍歷路由節點、<code>GroupKey</code> 計算、定時聚合調度槽位 (<code>slot</code>)。</td>
+              </tr>
+              <tr>
+                <td><code>notify/</code></td>
+                <td>裝飾者通知流水線 (Pipeline Stages)</td>
+                <td>責任鏈模式：<code>ClusterWaitStage</code> &rarr; <code>DedupStage</code> &rarr; <code>RetryStage</code> &rarr; <code>SetNotifiesStage</code>。</td>
+              </tr>
+              <tr>
+                <td><code>nflog/</code></td>
+                <td>通知歷史日誌 (Notification Log)</td>
+                <td>Protobuf 結構化儲存，記錄每個 Receiver 的發送時間戳與告警指紋，去重之核心依據。</td>
+              </tr>
+              <tr>
+                <td><code>cluster/</code></td>
+                <td>HashiCorp Memberlist Gossip 叢集實作</td>
+                <td>節點健康探測、<code>nflog</code> 與 <code>silences</code> 的 Push-Pull 及廣播擴散。</td>
+              </tr>
+              <tr>
+                <td><code>inhibit/</code></td>
+                <td>根因抑制規則引擎 (Inhibitor)</td>
+                <td>比對 Source Alert 與 Target Alert 之標籤相等性，自動過濾次級衍生異常。</td>
+              </tr>
+              <tr>
+                <td><code>silence/</code></td>
+                <td>時間窗口與標籤過濾靜音引擎</td>
+                <td>支援維護窗口定時靜默、緊急告警遮蔽，透過 Gossip 廣播 Tombstone。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="sub-2-1">2.1 告警接收與儲存 (<code>provider/mem</code> & <code>api/v2/</code>)</h3>
+        <p>
+          Prometheus 透過 <code>POST /api/v2/alerts</code> 推送告警集合。請求由 <code>api/v2/restapi</code> 進行校驗，並轉換為內部模型 <code>types.Alert</code>。
+        </p>
+        <p>
+          Alertmanager 內部採用純記憶體管理告警集合（<code>provider/mem</code>），每條告警以標籤集合的 64 位元哈希（<code>Fingerprint</code>）作為索引 Key，由背景定時維護協程清除過期項目，不依賴任何外部關係型資料庫。
+        </p>
+
+        <h3 id="sub-2-2">2.2 路由樹與匹配器機制 (<code>dispatch/</code> & <code>matcher/</code>)</h3>
+        <div class="mermaid-box">
+          <pre class="mermaid">
+flowchart TD
+    In["接收告警 (LabelSet)"] --> Match{"當前節點 Matchers 匹配?"}
+    Match -->|否| Reject["跳過當前分支"]
+    Match -->|是| Children{"遍歷子節點 (從左至右 DFS)"}
+    Children -->|子節點匹配且 continue=false| StopSiblings["處理該子節點，中斷同層遍歷 (break)"]
+    Children -->|子節點匹配且 continue=true| ContSiblings["處理該子節點，繼續比對同層下一個子節點"]
+    Children -->|所有子節點皆不匹配| Fallback["由當前節點 (或 Root) 本身處理"]
+    StopSiblings --> SlotAssign["分配至對應 slot (去重相同的 Route 規則)"]
+    ContSiblings --> SlotAssign
+    Fallback --> SlotAssign
+          </pre>
+        </div>
+
+        <div class="alert alert-important">
+          <div class="alert-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            Matcher 匹配器底層原理：正則強制自動錨定
+          </div>
+          <p>
+            位於 <code>pkg/labels/matcher.go</code>，Alertmanager 在編譯正則表達式匹配器時，會強制套用起訖錨點：
+          </p>
+          <code>re, err := regexp.Compile("^(?:" + v + ")$")</code>
+          <p style="margin-top:0.5rem;">
+            這意味著 <code>service =~ "api"</code> 僅會精確匹配字串 <code>"api"</code>，<strong>絕不會模糊命中 <code>"api-gateway"</code></strong>。如需前綴匹配，務必顯式撰寫為 <code>service =~ "api.*"</code>。
+          </p>
+          <p>
+            <strong>缺失標籤 (Absent Labels) 規則</strong>：未定義的標籤在比對時視同空字串 <code>""</code>。因此 <code>env = ""</code> 會命中所有未設置 <code>env</code> 標籤的告警，而 <code>env != ""</code> 則精確過濾出帶有 <code>env</code> 標籤且值不為空的告警。
+          </p>
+        </div>
+
+        <p><strong>Route Tree 遍歷演算法特性：</strong></p>
+        <ul>
+          <li><strong>屬性繼承 (RouteOpts Inheritance)</strong>：子節點自動繼承父節點的 <code>Receiver</code>、<code>GroupBy</code>、<code>GroupWait</code>、<code>GroupInterval</code>、<code>RepeatInterval</code>。子節點定義的參數原地覆蓋繼承值。</li>
+          <li><strong><code>continue: true</code> 控制流</strong>：預設子路由命中後會中斷同層後續搜尋；若啟用 <code>continue: true</code>，則允許繼續比對同層兄弟節點，這是實作「主告警送至 PagerDuty，同時抄送一份給 Slack 稽核頻道」的核心配置。</li>
+          <li><strong>Fallback 原則</strong>：若告警符合當前節點，但子節點均未命中，則當前節點即為匹配節點；若無任何子節點匹配，最後由根節點（Root）承接。</li>
+          <li><strong>槽位去重優化 (<code>slot</code>)</strong>：若多條路由具有相同的 Key 與完全相等的選項（<code>RouteOpts.equal</code>），Dispatcher 會將它們歸納到同一個內部 <code>slot</code> 物件，避免重複建立分組狀態機。</li>
+        </ul>
+
+        <h3 id="sub-2-3">2.3 告警分組 (<code>aggrGroup</code>) 與三大時間參數</h3>
+        <p>
+          Alertmanager 在分組時，會從告警中提取 <code>group_by</code> 所指定的標籤集合，並結合所屬路由 Key，計算出全局唯一的 <strong><code>GroupKey</code></strong>：
+        </p>
+        <div style="text-align: center; margin: 1.25rem 0;">
+          <code style="font-size: 1.1rem; padding: 0.5rem 1rem;">GroupKey = RouteKey : GroupByLabelSet</code>
+        </div>
+        <p>
+          每個獨立的 <code>GroupKey</code> 在記憶體中對應一個獨立運行的狀態機：<strong><code>aggrGroup</code></strong>。
+        </p>
+
+        <div class="code-wrapper">
+          <div class="code-header">
+            <span>分組計時器運作時序 (Timeline)</span>
+            <button class="code-copy-btn" onclick="copyCode(this)">複製時序</button>
+          </div>
+          <pre>時間軸 (Timeline) ─────────────────────────────────────────────────────────────>
+[t=0s] 告警 A 觸發 (新建 aggrGroup)
+  │  (啟動 group_wait 計時器)
+  ├─ [t=10s] 告警 B 到達 (同組，靜默聚合存入 store)
+  ├─ [t=20s] 告警 C 到達 (同組，靜默聚合存入 store)
+[t=30s] group_wait 到期 (30s)
+  │  ===> 【第一次通知】 發送批次 [A, B, C]
+  │  (將計時器重設為 group_interval)
+  │
+  ├─ [t=1m] 告警 D 到達 (同組新告警加入)
+  │         (不立即發送，等待計時器到期)
+[t=5m30s] group_interval 到期 (5m)
+  │  ===> 【狀態變更通知】 發送增量批次 (包含 D)
+  │  (若後續告警狀態維持不變...)
+  │
+[t=10m30s] group_interval 到期 (無變化，nflog 比對攔截，不發送)
+[t=15m30s] group_interval 到期 (無變化，nflog 比對攔截，不發送)
+...
+[t=4h5m30s] repeat_interval 到期 (4h)
+  │  ===> 【週期提醒通知】 (狀態無變化，但已達 repeat_interval，重新提醒)</pre>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>參數名稱</th>
+                <th>建議設定值</th>
+                <th>內部運作機制與架構目的</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong><code>group_wait</code></strong></td>
+                <td><code>10s ~ 30s</code></td>
+                <td><strong>初次通知緩衝時間</strong>。<br/>新群組產生時啟動。在緩衝期內吸收同組相繼觸發的告警，合併為單一通知送出，防範雪崩式告警碎片。</td>
+              </tr>
+              <tr>
+                <td><strong><code>group_interval</code></strong></td>
+                <td><code>5m</code></td>
+                <td><strong>群組狀態變更時的發送間隔</strong>。<br/>已發出過初次通知後，若有新告警加入該組或既有告警恢復（Resolved），必須等待滿 <code>group_interval</code> 才會發送更新批次，防止高頻抖動。</td>
+              </tr>
+              <tr>
+                <td><strong><code>repeat_interval</code></strong></td>
+                <td><code>4h ~ 12h</code></td>
+                <td><strong>告警持續存在時的重新發送週期</strong>。<br/>若告警維持 Firing 且標籤集合無任何變化，配合 <code>nflog</code> 去重日誌，僅在間隔超過此時間時重新提醒一次。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="sub-2-4">2.4 通知處理流水線與去重階段 (<code>notify/</code> & <code>nflog/</code>)</h3>
+        <p>
+          在 <code>notify/notify.go</code> 中，Alertmanager 將發送流程解耦為裝飾者模式的 Stage 責任鏈流水線：
+        </p>
+
+        <div class="mermaid-box">
+          <pre class="mermaid">
+flowchart LR
+    A["aggrGroup.flush()"] --> B["ClusterGossipSettleStage"]
+    B --> C["MuteStage (Inhibitor)"]
+    C --> D["TimeActiveStage / TimeMuteStage"]
+    D --> E["MuteStage (Silencer)"]
+    E --> F["FanoutStage (各 Receiver 管道)"]
+    
+    subgraph ReceiverPipe["Per-Receiver Pipeline"]
+        F1["ClusterWaitStage"] --> F2["DedupStage (nflog 比對)"]
+        F2 --> F3["RetryStage (Notifier 發送)"]
+        F3 --> F4["SetNotifiesStage (寫入日誌並廣播)"]
+    end
+    F --> ReceiverPipe
+          </pre>
+        </div>
+
+        <ol>
+          <li><strong><code>ClusterGossipSettleStage</code></strong>：節點剛加入叢集或重啟時暫緩發送，等待成員狀態完成 Gossip 初始同步。</li>
+          <li><strong><code>MuteStage (Inhibitor)</code></strong>：比對 <code>inhibit_rules</code>。若系統中存在符合條件的根因告警（Source Alert），且當前告警（Target Alert）滿足標籤相等性，則直接剔除。</li>
+          <li><strong><code>TimeActiveStage / TimeMuteStage</code></strong>：評估 <code>time_intervals</code>（如週末、非辦公時間），決定是否靜默。</li>
+          <li><strong><code>MuteStage (Silencer)</code></strong>：檢查使用者建立的 Silence 靜音規則。</li>
+          <li><strong><code>FanoutStage</code></strong>：將告警組分派給各目標接收端（Slack、Webhook 等），進入專屬子階段：
+            <ul>
+              <li><strong><code>ClusterWaitStage</code></strong>：依據叢集節點排名等待對應階梯延遲。</li>
+              <li><strong><code>DedupStage</code></strong>：查詢 <code>NotificationLog (nflog)</code>。若本組告警集合與前次相同且尚未逾期 <code>repeat_interval</code>，則標記 <code>ReasonDoNotNotify</code> 並直接中斷。</li>
+              <li><strong><code>RetryStage</code></strong>：執行外部網路請求（HTTP POST 到 Slack 等），具備指數退避重試能力。</li>
+              <li><strong><code>SetNotifiesStage</code></strong>：發送成功後，將本次發送記錄寫入本地 <code>nflog</code>，並立即向 Gossip 網路廣播。</li>
+            </ul>
+          </li>
+        </ol>
+      </section>
+
+      <!-- Section 3: HA Cluster -->
+      <section id="ha-cluster">
+        <h2>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+          3. Alertmanager 高可用叢集 (HA Cluster) 與去重機制深入剖析
+        </h2>
+
+        <h3 id="sub-3-1">3.1 設計哲學：CAP 定理與「Fail-Open」原則</h3>
+        <p>
+          在分散式系統 CAP 定理中，Alertmanager 選擇了 <strong>AP（可用性與分區容忍性）</strong>。
+        </p>
+        <p>
+          其核心設計哲學為<strong>「Fail-Open (寧可多發，不可漏發)」</strong>：
+          告警系統首要目標是將基礎設施或業務異常<strong>百分之百送達</strong>維運人員手中。在面對網路抖動、分區（Split-Brain）或狀態同步衝突時，Alertmanager 寧可向接收端發送重複的通知，也絕不冒著遺漏關鍵告警的風險去追求嚴格的強一致性（CP）。
+        </p>
+
+        <h3 id="sub-3-2">3.2 通訊底層：HashiCorp Memberlist Gossip 協議</h3>
+        <p>
+          Alertmanager 底層採用了 HashiCorp <code>memberlist</code> 函式庫建立 Full-Mesh 去中心化 Gossip 拓撲：
+        </p>
+        <ul>
+          <li><strong>通訊埠口</strong>：預設監聽 <strong><code>9094 TCP/UDP</code></strong>。
+            <ul>
+              <li><strong>UDP</strong>：負責低延遲的 Ping/Ack 節點存活性心跳探測。</li>
+              <li><strong>TCP</strong>：負責可靠的狀態資料全量推送 (Push/Pull) 與狀態廣播 (Broadcast)。</li>
+            </ul>
+          </li>
+          <li><strong>節點狀態生命週期</strong>：
+            <code>Alive (存活)</code> &rarr; <code>Suspect (可疑，心跳超時)</code> &rarr; <code>Dead (判定離線)</code>。
+          </li>
+        </ul>
+
+        <h3 id="sub-3-3">3.3 狀態同步與 CRDT 合併（nflog 與 silences）</h3>
+        <p>
+          在叢集 Gossip 網路中，主要複製兩類狀態資料（以 Protobuf 格式封裝）：
+        </p>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>同步狀態</th>
+                <th>檔案路徑與結構</th>
+                <th>衝突解決與合併演算法</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong><code>nflog</code> (Notification Log)</strong></td>
+                <td><code>data/nflog</code> (<code>nflogpb.Entry</code>)</td>
+                <td>記錄每個 Receiver + GroupKey 組合的最後發送時間與告警指紋集合。採用 <strong>最後寫入者勝 (Last-Write-Wins, LWW)</strong>，以最新時間戳記合併。</td>
+              </tr>
+              <tr>
+                <td><strong><code>silences</code> (靜音資料)</strong></td>
+                <td><code>data/silences</code> (<code>silencepb.Silence</code>)</td>
+                <td>使用者在任何節點建立的靜音規則。以 <code>UpdatedAt</code> 最新者獲勝。刪除操作本質上是建立一個過期時間為當前的更新（Tombstone）並向外擴散。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="alert alert-note">
+          <div class="alert-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            為何原始告警本體不進行 Gossip 同步？
+          </div>
+          <p>
+            Prometheus 每隔一個評估週期（如 15 秒）就會自動將所有 Firing 與 Resolved 告警向 Alertmanager 重新發送。告警本體僅存於各節點本地記憶體，因此完全不需要消耗寶貴的 Gossip 頻寬同步原始告警。
+          </p>
+        </div>
+
+        <h3 id="sub-3-4">3.4 階梯等待去重演算法 (Position-based Staggered Wait)</h3>
+        <p>
+          當多個 Alertmanager 節點同時收到一模一樣的告警時，為了防止每個節點都向接收端發送重複訊息，Alertmanager 設計了精巧的<strong>依位置階梯等待機制</strong>：
+        </p>
+
+        <!-- Inline Archify Callout 2 -->
+        <div class="archify-inline-callout">
+          <div class="archify-inline-info">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <div class="archify-inline-text">
+              <h4>互動式 HA 階梯等待時序圖 (Archify Sequence)</h4>
+              <p>以毫秒級步進檢視 Position 0 立即發送、Position 1/2 階梯等待與 nflog 去重丟棄的動態過程。</p>
+            </div>
+          </div>
+          <div class="archify-inline-btns">
+            <a href="./alertmanager-ha-sequence.html" target="_blank" class="btn-action-primary">在新分頁開啟 ↗</a>
+            <button onclick="openArchifyModal('alertmanager-ha-sequence.html', 'HA 階梯等待時序圖 · Sequence')" class="btn-action-secondary">🔍 快速預覽</button>
+          </div>
+        </div>
+
+        <div class="mermaid-box">
+          <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant P as Prometheus HA
+    participant AM0 as Alertmanager 0<br/>(Position 0)
+    participant AM1 as Alertmanager 1<br/>(Position 1)
+    participant AM2 as Alertmanager 2<br/>(Position 2)
+    participant Slack as Slack Notifier
+
+    P->>AM0: POST /api/v2/alerts
+    P->>AM1: POST /api/v2/alerts
+    P->>AM2: POST /api/v2/alerts
+
+    Note over AM0: 等待時間 = 0 * 15s = 0s (立即執行)
+    Note over AM1: 等待時間 = 1 * 15s = 15s (計時等待)
+    Note over AM2: 等待時間 = 2 * 15s = 30s (計時等待)
+
+    AM0->>Slack: 1. 本地 nflog 無紀錄 -> 成功發送通知
+    AM0-->>AM1: 2. Gossip 廣播 nflog 成功發送紀錄
+    AM0-->>AM2: 2. Gossip 廣播 nflog 成功發送紀錄
+
+    Note over AM1: 15s 到期喚醒，查詢本地 nflog
+    AM1->>AM1: 3. 發現 AM0 已經發送成功 -> DedupStage 靜默攔截 (丟棄)
+
+    Note over AM2: 30s 到期喚醒，查詢本地 nflog
+    AM2->>AM2: 3. 發現 AM0 已經發送成功 -> DedupStage 靜默攔截 (丟棄)
+          </pre>
+        </div>
+
+        <p><strong>源碼級運作機制分析：</strong></p>
+        <ol>
+          <li>
+            <strong>節點位置排序 (<code>p.Position()</code>)</strong>：
+            在 <code>cluster/cluster.go</code> 中，節點取得當前叢集成員列表，並按照節點名稱的字典序進行排序：
+            <div class="code-wrapper">
+              <div class="code-header">
+                <span>cluster/cluster.go</span>
+                <button class="code-copy-btn" onclick="copyCode(this)">複製 Go</button>
+              </div>
+              <pre>func (p *Peer) Position() int {
+    all := p.mlist.Members()
+    sort.Slice(all, func(i, j int) bool {
+        return all[i].Name < all[j].Name
+    })
+    for i, m := range all {
+        if m.Name == p.Self().Name {
+            return i
+        }
+    }
+    return 0
+}</pre>
+            </div>
+          </li>
+          <li>
+            <strong>階梯延遲計算 (<code>clusterWait</code>)</strong>：
+            在 <code>app/cluster.go</code> 中，通知管線在執行發送前會先睡眠一段偏置時間：
+            <div style="text-align: center; margin: 1rem 0;">
+              <code>WaitDuration = Position × peer_timeout (預設 peer_timeout = 15s)</code>
+            </div>
+            <ul>
+              <li>節點 0（Position 0）：等待 $0 	imes 15	ext{s} = 0	ext{s}$（立即處理發送）。</li>
+              <li>節點 1（Position 1）：等待 $1 	imes 15	ext{s} = 15	ext{s}$。</li>
+              <li>節點 2（Position 2）：等待 $2 	imes 15	ext{s} = 30	ext{s}$。</li>
+            </ul>
+          </li>
+          <li>
+            <strong>發送與 Gossip 狀態廣播</strong>：
+            節點 0 最先醒來，查詢 <code>nflog</code> 發現無發送紀錄，隨即發送給 Slack。發送成功後，於 <code>SetNotifiesStage</code> 寫入本地 <code>nflog</code>，並透過 Gossip 廣播給其他節點。
+            節點 1 在 15 秒後喚醒，查詢 <code>nflog</code> 時發現節點 0 剛廣播過來的發送紀錄，判定該告警已發送過，<code>DedupStage</code> 直接靜默拋棄。
+          </li>
+          <li>
+            <strong>無縫故障轉移 (Failover)</strong>：
+            若節點 0 宕機或外部連線失敗，便無法寫入與廣播 <code>nflog</code>。當節點 1 在 15 秒後醒來時，發現本地 <code>nflog</code> 依舊沒有這筆發送記錄，<strong>節點 1 便會自動接手發送</strong>，達成容錯備援。
+          </li>
+        </ol>
+
+        <h3 id="sub-3-5">3.5 狀態沉澱機制 (Gossip Settling)</h3>
+        <p>
+          剛加入叢集或重啟後的 Alertmanager 節點，若立即開始發送通知，會因尚未接收到其他節點廣播的 Silence 或最新的 <code>nflog</code> 去重紀錄，導致誤發或重複發送。
+        </p>
+        <p>
+          為此，Alertmanager 在流水線開頭加入了 <strong><code>ClusterGossipSettleStage</code></strong>：
+        </p>
+        <ul>
+          <li>節點啟動後會先進入「沉澱觀察期」。</li>
+          <li>該演算法會定期檢查叢集成員數量，必須等到<strong>連續 3 次檢查期間成員數保持穩定</strong>（或達到 settle 超時時間）。</li>
+          <li>沉澱期間：節點正常接收並存儲 Prometheus 推送的告警，但<strong>暫緩執行發送流水線</strong>，直到全局拓撲與狀態同步完成。</li>
+        </ul>
+
+        <h3 id="sub-3-6">3.6 網路分區與腦裂 (Split-Brain) 處理</h3>
+        <p>
+          當跨機房網路中斷時，Alertmanager 叢集可能會被切分為多個互不連通的孤島：
+        </p>
+        <div class="code-wrapper">
+          <div class="code-header"><span>分區前後架構拓撲</span></div>
+          <pre>分裂前：
+[ AM-1 ] <─── Gossip ───> [ AM-2 ] <─── Gossip ───> [ AM-3 ]
+
+分裂後 (網路分區)：
+分區 A: [ AM-1 ] (孤島)      |  分區 B: [ AM-2 ] <───> [ AM-3 ]</pre>
+        </div>
+        <ul>
+          <li><strong>分區 A (AM-1)</strong>：在自身視角中叢集僅剩 1 台，AM-1 成為 Position 0，等待 0 秒 &rarr; <strong>發送告警</strong>。</li>
+          <li><strong>分區 B (AM-2, AM-3)</strong>：AM-2 成為分區內的 Position 0，等待 0 秒 &rarr; <strong>發送告警</strong>；AM-3 為 Position 1，被 AM-2 的 <code>nflog</code> 去重。</li>
+          <li><strong>結果</strong>：維運人員會收到 <strong>兩封重複的告警</strong>。</li>
+          <li><strong>網路自癒（Heal）</strong>：當網路分區修復後，Memberlist 自動重新建立連線，兩邊的 <code>nflog</code> 與 <code>silences</code> 進行 LWW 合併，後續通知立刻恢復為單份發送。完全體現 <strong>Fail-Open</strong> 原則。</li>
+        </ul>
+
+        <h3 id="sub-3-7">3.7 持久化儲存與狀態快照 (Snapshot)</h3>
+        <p>
+          每個 Alertmanager 實例均會定期將記憶體狀態快照寫入磁碟：
+        </p>
+        <ul>
+          <li><code>data/nflog</code>：通知歷史日誌快照。</li>
+          <li><code>data/silences</code>：靜音規則快照。</li>
+        </ul>
+
+        <div class="alert alert-caution">
+          <div class="alert-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            容器環境警示：務必為 Alertmanager 掛載 PersistentVolumeClaim (PVC)
+          </div>
+          <p>
+            在 Kubernetes / Rancher 等容器環境中，若使用預設的 <code>EmptyDir</code>，Pod 重啟時本地快照將徹底遺失；若多個 Pod 同時滾動重啟，可能導致剛被 Silence 的告警再次爆發或造成通知重複發送。
+          </p>
+        </div>
+
+        <h3 id="sub-3-8">3.8 核心黃金法則：Prometheus 嚴禁透過負載均衡器連接</h3>
+        <p>
+          在配置 Prometheus 與 Alertmanager 叢集時，最常見的架構錯誤就是在中間架設 Load Balancer：
+        </p>
+        <ul>
+          <li>❌ <strong>錯誤做法</strong>：Prometheus &rarr; Load Balancer &rarr; Alertmanager Cluster
+            <br>破壞了平行獨立評估機制，LB 成為單點故障，且若命中沉澱期實例會引發延遲。
+          </li>
+          <li>✔️ <strong>正確做法</strong>：Prometheus &rarr; <strong>直連所有 Alertmanager 實例</strong>
+            <div class="code-wrapper">
+              <div class="code-header">
+                <span>prometheus.yml</span>
+                <button class="code-copy-btn" onclick="copyCode(this)">複製 YAML</button>
+              </div>
+              <pre>alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'am-1.corp.internal:9093'
+            - 'am-2.corp.internal:9093'
+            - 'am-3.corp.internal:9093'</pre>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- Section 4: Rancher Monitoring -->
+      <section id="rancher-integration">
+        <h2>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+          4. Rancher Monitoring (v2) 整合架構與運作機制
+        </h2>
+        <p>
+          在 SUSE Rancher 2.x 中，監控架構使用 <strong>Rancher Monitoring (v2)</strong>，其底層是基於 <code>Prometheus Operator</code> 與 <code>kube-prometheus-stack</code> 的深度整合。
+        </p>
+
+        <div class="mermaid-box">
+          <pre class="mermaid">
+flowchart TD
+    subgraph K8sCluster["Kubernetes Cluster"]
+        subgraph NS_Monitoring["namespace: cattle-monitoring-system"]
+            PromOp["Prometheus Operator"]
+            AM_CR["Alertmanager CR"]
+            AM_STS["StatefulSet: alertmanager-rancher-monitoring-alertmanager"]
+            AM_Secret["Secret: alertmanager-rancher-monitoring-alertmanager"]
+            AM_Headless["Headless Service: alertmanager-operated (:9094)"]
+            AM_SVC["Service: rancher-monitoring-alertmanager (:9093)"]
+        end
+
+        subgraph NS_Workload["namespace: app-production"]
+            AM_Config["AlertmanagerConfig CRD<br/>(Namespaced Routes & Receivers)"]
+            Prom_Rule["PrometheusRule CRD<br/>(Alerting Rules)"]
+        end
+
+        PromOp -->|Watch & Reconcile| AM_CR
+        PromOp -->|Watch & Reconcile| AM_Config
+        PromOp -->|編譯並產生 alertmanager.yaml| AM_Secret
+        AM_Secret -.->|Volume Mount| AM_STS
+        AM_STS --- AM_Headless
+        AM_STS --> AM_SVC
+    end
+
+    subgraph RancherDashboard["Rancher UI (Cluster Explorer)"]
+        UI_Route["Monitoring -> AlertmanagerConfigs"]
+        UI_Silence["Monitoring -> Silences"]
+    end
+
+    UI_Route -->|管理 CRD| AM_Config
+    UI_Silence -->|Proxy REST API| AM_SVC
+          </pre>
+        </div>
+
+        <h3 id="sub-4-1">4.1 核心元件與 Kubernetes 資源對應</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>資源名稱</th>
+                <th>資源類型</th>
+                <th>功能與角色說明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong><code>rancher-monitoring-crd</code></strong></td>
+                <td>Helm Chart</td>
+                <td>安裝 Prometheus Operator 所定義的 CRD（包括 <code>Alertmanager</code>, <code>AlertmanagerConfig</code>, <code>PrometheusRule</code> 等）。</td>
+              </tr>
+              <tr>
+                <td><strong><code>rancher-monitoring</code></strong></td>
+                <td>Helm Chart</td>
+                <td>部署 Prometheus Operator、Alertmanager StatefulSet、Grafana、Node-Exporter 等核心控制器。</td>
+              </tr>
+              <tr>
+                <td><strong><code>Alertmanager</code> (CRD)</strong></td>
+                <td>Custom Resource</td>
+                <td>定義 Alertmanager 的集群規模（<code>replicas: 3</code>）、儲存 PVC 配置、版本映像檔與資源限制。</td>
+              </tr>
+              <tr>
+                <td><strong><code>AlertmanagerConfig</code> (CRD)</strong></td>
+                <td>Custom Resource</td>
+                <td>宣告式（Declarative）定義路由、接收端、抑制與靜音規則。支援全域模式與命名空間專屬模式。</td>
+              </tr>
+              <tr>
+                <td><strong><code>alertmanager-rancher-monitoring-alertmanager</code></strong></td>
+                <td>K8s Secret</td>
+                <td>Operator 將所有 <code>AlertmanagerConfig</code> CRD 與全域設定編譯、驗證後輸出的最終設定檔（<code>alertmanager.yaml</code>）。</td>
+              </tr>
+              <tr>
+                <td><strong><code>config-reloader</code></strong></td>
+                <td>Sidecar 容器</td>
+                <td>與 Alertmanager 主容器運行於同一 Pod，監聽 Secret 掛載目錄變更，並自動發送 <code>POST http://localhost:9093/-/reload</code> 進行熱重載。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="sub-4-2">4.2 命名空間隔離機制 (Namespace Enforcement)</h3>
+        <p>
+          Rancher Monitoring 的多租戶核心在於 <code>AlertmanagerConfig</code> 的命名空間隔離：
+        </p>
+        <p>
+          當業務團隊在 <code>app-production</code> 命名空間建立 <code>AlertmanagerConfig</code> 時，Prometheus Operator 在編譯時會<strong>強制在該配置的所有路由規則中注入標籤過濾</strong>：
+        </p>
+        <div class="code-wrapper">
+          <div class="code-header"><span>Operator 自動注入的 namespace 限制</span></div>
+          <pre>matchers:
+  - name: namespace
+    value: app-production
+    matchType: "="</pre>
+        </div>
+        <p>
+          <strong>資安與穩定性保障</strong>：業務團隊無法透過 CRD 截獲其他專案或全集群層級（如 Node、Etcd、Ingress）的告警，實現了真正的專案級告警自治（Self-service）。
+        </p>
+
+        <h3 id="sub-4-3">4.3 GitOps 部署實踐與 Namespace 注入層級 (Argo CD + Kustomize + Helm)</h3>
+        <p>
+          在實際以 GitOps（如 Argo CD）管理 Rancher 監控系統與自建微服務（如 <code>gchat-relay</code> 告警轉發器）時，常有疑問：<strong>「為什麼各 App 目錄下的 <code>values.yaml</code> 或資源檔案都沒有特別註明 <code>namespace</code>？」</strong>
+        </p>
+        <p>
+          這是標準雲原生架構中<strong>職責分離（Separation of Concerns）</strong>與<strong>三層注入階層</strong>的體現：
+        </p>
+
+        <div class="mermaid-box">
+          <pre class="mermaid">
+flowchart TD
+    A["GitOps 控制層 (Argo CD Application)"] -->|spec.destination.namespace| B["第一層：強制注入目標 Namespace"]
+    B --> C["Kustomize 覆寫層 (kustomization.yaml)"]
+    C -->|頂層 namespace: xxx| D["第二層：批次改寫所有子資源 metadata"]
+    D --> E["Helm 渲染層 (Makefile / values.yaml)"]
+    E -->|helm template --namespace xxx| F["第三層：代入 {{ .Release.Namespace }}"]
+    
+    subgraph AppScope["應用程式定義 (values.yaml / base.yaml)"]
+        G["僅定義應用行為、探針、副本數、資源限制<br/>(完全不硬編碼 namespace，保證環境可移植性)"]
+    end
+    F -.-> AppScope
+          </pre>
+        </div>
+
+        <ol>
+          <li><strong>第一層：Argo CD Application 層級 (<code>spec.destination.namespace</code>)</strong>：
+            宣告目標環境，Argo CD 在 Sync 時將未宣告 namespace 的資源統整歸入。
+          </li>
+          <li><strong>第二層：Kustomize 層級 (<code>kustomization.yaml</code>)</strong>：
+            在各環境 Overlay 透過頂層 <code>namespace: gchat-relay</code> 批次補齊子資源。
+          </li>
+          <li><strong>第三層：Helm 離線編譯腳本 (<code>Makefile</code>)</strong>：
+            透過 <code>helm template ... --namespace cattle-monitoring-system</code> 動態代入 <code>{{ .Release.Namespace }}</code>。
+          </li>
+        </ol>
+
+        <h4>跨命名空間告警轉發實務 (Cross-Namespace Webhook)</h4>
+        <p>
+          當 Alertmanager（位於 <code>cattle-monitoring-system</code>）需要推送告警給 <code>gchat-relay</code> 命名空間的服務時，使用 Kubernetes 內部 CoreDNS FQDN 通訊：
+        </p>
+        <div class="code-wrapper">
+          <div class="code-header"><span>跨命名空間 Webhook 配置</span></div>
+          <pre>spec:
+  receivers:
+    - name: 'gchat-relay-webhook'
+      webhookConfigs:
+        - url: 'http://gchat-relay.gchat-relay.svc.cluster.local:8080/v1/alerts'
+          sendResolved: true</pre>
+        </div>
+      </section>
+
+      <!-- Section 5: Production Manifests -->
+      <section id="manifests">
+        <h2>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          5. 生產環境部署清單 (Production Manifests)
+        </h2>
+
+        <h3 id="sub-5-1">5.1 全域 AlertmanagerConfig 範例 (<code>cattle-monitoring-system</code>)</h3>
+        <p>
+          包含 Critical 告警多重分發（PagerDuty + Slack）、Warning 告警分流，以及關鍵的<strong>節點宕機抑制規則</strong>：
+        </p>
+
+        <div class="code-wrapper">
+          <div class="code-header">
+            <span>cattle-monitoring-system-alertmanagerconfig.yaml</span>
+            <button class="code-copy-btn" onclick="copyCode(this)">複製 YAML</button>
+          </div>
+          <pre>apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: rancher-global-alertmanager-config
+  namespace: cattle-monitoring-system
+  labels:
+    alertmanagerConfig: rancher-monitoring-alertmanager
+spec:
+  route:
+    groupBy: ['alertname', 'cluster', 'namespace', 'service']
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 6h
+    receiver: 'slack-default'
+    routes:
+      # 1. 嚴重級別 (Critical)：直通 PagerDuty，並藉由 continue: true 同時抄送 Slack 緊急頻道
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: 'pagerduty-urgent'
+        continue: true
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: 'slack-sre-critical'
+
+      # 2. 警告級別 (Warning)：發送至監控日常告警頻道
+      - matchers:
+          - name: severity
+            value: warning
+        receiver: 'slack-warnings'
+
+      # 3. 節點與硬體基礎設施告警：發送至自動化維運 Webhook
+      - matchers:
+          - name: alertname
+            value: "(KubeNodeNotReady|NodeDiskPressure|NodeMemoryHigh)"
+            matchType: "=~"
+        receiver: 'infra-ops-webhook'
+
+  inhibitRules:
+    # 核心根因抑制：節點離線 (KubeNodeNotReady) 時，自動抑制該節點上的所有衍生 Pod 異常
+    - sourceMatch:
+        - name: alertname
+          value: KubeNodeNotReady
+      targetMatch:
+        - name: alertname
+          value: "(TargetDown|KubePodCrashLooping|KubePodNotReady)"
+          matchType: "=~"
+      equal: ['node', 'instance']
+
+  receivers:
+    - name: 'slack-default'
+      slackConfigs:
+        - channel: '#alerts-general'
+          sendResolved: true
+          apiURL:
+            name: alert-slack-credentials
+            key: webhook-url
+          title: '{{ template "slack.default.title" . }}'
+          text: '{{ template "slack.default.text" . }}'
+
+    - name: 'slack-sre-critical'
+      slackConfigs:
+        - channel: '#alerts-sre-critical'
+          sendResolved: true
+          apiURL:
+            name: alert-slack-credentials
+            key: webhook-url
+
+    - name: 'slack-warnings'
+      slackConfigs:
+        - channel: '#alerts-warnings'
+          sendResolved: true
+          apiURL:
+            name: alert-slack-credentials
+            key: webhook-url
+
+    - name: 'pagerduty-urgent'
+      pagerdutyConfigs:
+        - serviceKey:
+            name: alert-pagerduty-secret
+            key: service-key
+          sendResolved: true
+
+    - name: 'infra-ops-webhook'
+      webhookConfigs:
+        - url: 'https://ops-gateway.corp.internal/v1/alerts'
+          sendResolved: true</pre>
+        </div>
+
+        <h3 id="sub-5-2">5.2 業務命名空間專屬 AlertmanagerConfig (<code>app-payment</code>)</h3>
+        <div class="code-wrapper">
+          <div class="code-header">
+            <span>app-payment-alertmanagerconfig.yaml</span>
+            <button class="code-copy-btn" onclick="copyCode(this)">複製 YAML</button>
+          </div>
+          <pre>apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: payment-team-alerts
+  namespace: app-payment
+spec:
+  route:
+    groupBy: ['alertname', 'job']
+    groupWait: 15s
+    groupInterval: 3m
+    repeatInterval: 4h
+    receiver: 'payment-webhook'
+  receivers:
+    - name: 'payment-webhook'
+      webhookConfigs:
+        - url: 'https://webhook.payment.corp.internal/events'
+          sendResolved: true</pre>
+        </div>
+      </section>
+
+      <!-- Section 6: Troubleshooting -->
+      <section id="troubleshooting">
+        <h2>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          6. 維運排錯與指標監控 (Operations & Troubleshooting)
+        </h2>
+
+        <h3 id="sub-6-1">6.1 告警重複接收的四大排查點</h3>
+        <ol>
+          <li>
+            <strong>Gossip 通訊埠 (:9094) 受阻</strong>：
+            每個 Pod 都各自發送出一份相同告警。NetworkPolicy 或防火牆未放行 TCP/UDP 9094 埠，導致去重日誌無法同步。
+            使用 <code>amtool cluster show</code> 確認叢集所有節點狀態為 <code>ready</code>。
+          </li>
+          <li>
+            <strong>PVC 遺失導致狀態清空</strong>：
+            預設 Rancher 若使用 <code>EmptyDir</code>，Pod 重啟時本機 <code>nflog</code> 與 <code>silences</code> 會丟失。強烈建議在 <code>Alertmanager</code> CR 中設定 StorageSpec 掛載 PVC。
+          </li>
+          <li>
+            <strong><code>repeat_interval</code> 設定過短</strong>：
+            若設為 5 分鐘，會使正常週期提醒被誤判為重複發送。
+          </li>
+          <li>
+            <strong>跨路由 <code>group_by</code> 標籤維度不一致</strong>：
+            不同路由若定義不同的分組維度，會計算出不同的 GroupKey，並在獨立的 <code>aggrGroup</code> 中各自觸發通知。
+          </li>
+        </ol>
+
+        <h3 id="sub-6-2">6.2 熱重載與診斷工具流</h3>
+        <div class="code-wrapper">
+          <div class="code-header">
+            <span>維運排錯診斷指令集 (Bash)</span>
+            <button class="code-copy-btn" onclick="copyCode(this)">複製指令</button>
+          </div>
+          <pre># 1. 檢查 config-reloader sidecar 容器日誌
+kubectl logs -n cattle-monitoring-system alertmanager-rancher-monitoring-alertmanager-0 -c config-reloader -f
+
+# 2. 檢驗目前載入的最終設定檔
+kubectl exec -it -n cattle-monitoring-system alertmanager-rancher-monitoring-alertmanager-0 -c alertmanager --   amtool config show --alertmanager.url=http://localhost:9093
+
+# 3. 測試路由比對 (驗證特定標籤會走向哪一個 Receiver)
+kubectl exec -it -n cattle-monitoring-system alertmanager-rancher-monitoring-alertmanager-0 -c alertmanager --   amtool config routes test --alertmanager.url=http://localhost:9093 severity=critical alertname=KubeNodeNotReady
+
+# 4. 檢查叢集 Gossip 成員健康狀態
+kubectl exec -it -n cattle-monitoring-system alertmanager-rancher-monitoring-alertmanager-0 -c alertmanager --   amtool cluster show --alertmanager.url=http://localhost:9093</pre>
+        </div>
+
+        <h3 id="sub-6-3">6.3 關鍵監控指標 (Prometheus Metrics)</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>指標名稱</th>
+                <th>正常預期</th>
+                <th>異常代表意義與因應對策</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>alertmanager_cluster_members</code></td>
+                <td>等於副本數 (如 3)</td>
+                <td>節點發生分區（Split-Brain）或網路失聯，應檢查 9094 埠。</td>
+              </tr>
+              <tr>
+                <td><code>alertmanager_cluster_failed_peers</code></td>
+                <td>0</td>
+                <td>存在失效對等節點，Gossip 同步受阻。</td>
+              </tr>
+              <tr>
+                <td><code>alertmanager_peer_position</code></td>
+                <td>0 ~ (Replicas-1)</td>
+                <td>當前節點在叢集排序中的位置，決定階梯延遲長度。</td>
+              </tr>
+              <tr>
+                <td><code>alertmanager_notifications_failed_total</code></td>
+                <td>0 或極低且不持續增加</td>
+                <td>外部接收端（Slack/PagerDuty/Webhook）網路中斷或 API Token 失效。</td>
+              </tr>
+              <tr>
+                <td><code>alertmanager_alerts_received_total</code></td>
+                <td>穩定趨勢</td>
+                <td>數值陡增代表下游集群發生大範圍告警風暴。</td>
+              </tr>
+              <tr>
+                <td><code>alertmanager_silences{status="active"}</code></td>
+                <td>符合維護計畫</td>
+                <td>活躍靜音數量過多時，應審核是否有忘記清理的永久靜音。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section 7: Decision Matrix -->
+      <section id="decision-matrix">
+        <h2>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+          7. 架構決策與實施建議矩陣 (Architecture Decision Matrix)
+        </h2>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>架構維度</th>
+                <th>建議做法 (Best Practices)</th>
+                <th>避免做法 (Anti-Patterns)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>高可用性 (HA)</strong></td>
+                <td>Replicas &ge; 3 + 持久化 PVC + 開放 TCP/UDP 9094 Gossip 埠</td>
+                <td>單節點部署；使用 EmptyDir 儲存；封鎖 Pod 間 9094 網路連線</td>
+              </tr>
+              <tr>
+                <td><strong>負載平衡與連線模式</strong></td>
+                <td>Prometheus 直連所有 AM 節點（平行多播廣播直連）</td>
+                <td>在 Prometheus 與 AM 間架設負載均衡器（破壞獨立評估與容錯架構）</td>
+              </tr>
+              <tr>
+                <td><strong>分組粒度 (Grouping)</strong></td>
+                <td><code>group_by: [alertname, cluster, namespace, service]</code></td>
+                <td><code>group_by: [pod, instance]</code>（粒度過細導致無法聚合降噪）</td>
+              </tr>
+              <tr>
+                <td><strong>時間控制 (Timers)</strong></td>
+                <td><code>group_wait: 30s</code><br><code>group_interval: 5m</code><br><code>repeat_interval: 4h ~ 6h</code></td>
+                <td><code>group_wait: 0s</code>（喪失初次聚合能力）<br><code>repeat_interval: 5m</code>（引發通知洗版）</td>
+              </tr>
+              <tr>
+                <td><strong>多租戶管理</strong></td>
+                <td>業務團隊使用專屬命名空間 CRD (<code>AlertmanagerConfig</code>)</td>
+                <td>所有人共用全域 Secret 進行手動修改（無權限防護，容易格式錯誤中斷）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Interactive Archify Modal Viewer -->
+  <div id="archify-modal" class="modal-overlay" onclick="closeArchifyModal(event)">
+    <div class="modal-window" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title-bar">
+          <span id="modal-icon">🌟</span>
+          <span id="modal-title">Archify 視覺化圖表</span>
+          <span class="badge badge-primary" style="font-size: 0.7rem;">獨立互動模式</span>
+        </div>
+        <div class="modal-controls">
+          <a id="modal-external-link" href="#" target="_blank" class="btn-action-secondary" style="font-size: 0.75rem; padding: 0.3rem 0.6rem;">
+            新分頁開啟 ↗
+          </a>
+          <button onclick="toggleModalFullscreen()" class="btn-icon" title="全螢幕切換">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+          </button>
+          <button onclick="closeArchifyModal()" class="btn-icon" title="關閉 (Esc)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <iframe id="modal-iframe" class="modal-iframe" src="about:blank"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <p>
+      Prometheus Alertmanager Architecture & Rancher Monitoring Knowledge Hub · Static GitHub Pages Edition
+    </p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem;">
+      視覺化圖表由 <a href="https://github.com/prometheus/alertmanager" target="_blank">Archify</a> 提供技術渲染 · 支援離線瀏覽與 GitHub Pages 零配置託管
+    </p>
+  </footer>
+
+  <script>
+    // Initialize Mermaid
+    if (typeof mermaid !== 'undefined') {
+      const isDark = document.documentElement.classList.contains('dark');
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: isDark ? 'dark' : 'default',
+        securityLevel: 'loose',
+        fontFamily: 'Inter, Noto Sans TC, sans-serif'
+      });
+    }
+
+    // Theme Toggle Logic
+    const themeBtn = document.getElementById('theme-toggle');
+    const darkIcon = document.getElementById('theme-icon-dark');
+    const lightIcon = document.getElementById('theme-icon-light');
+
+    function applyTheme(isDark) {
+      if (isDark) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+        darkIcon.style.display = 'block';
+        lightIcon.style.display = 'none';
+        localStorage.setItem('theme', 'dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+        darkIcon.style.display = 'none';
+        lightIcon.style.display = 'block';
+        localStorage.setItem('theme', 'light');
+      }
+    }
+
+    // Check saved theme or system preference
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'light') {
+      applyTheme(false);
+    } else {
+      applyTheme(true);
+    }
+
+    themeBtn.addEventListener('click', () => {
+      const isDark = document.documentElement.classList.contains('dark');
+      applyTheme(!isDark);
+    });
+
+    // Archify Modal Functions
+    const modal = document.getElementById('archify-modal');
+    const modalIframe = document.getElementById('modal-iframe');
+    const modalTitle = document.getElementById('modal-title');
+    const modalLink = document.getElementById('modal-external-link');
+
+    function openArchifyModal(url, title) {
+      modalTitle.textContent = title;
+      modalLink.href = './' + url;
+      modalIframe.src = './' + url;
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeArchifyModal(event) {
+      if (event && event.target !== modal && !event.target.closest('.btn-icon')) return;
+      modal.classList.remove('active');
+      modalIframe.src = 'about:blank';
+      document.body.style.overflow = 'auto';
+    }
+
+    function toggleModalFullscreen() {
+      const win = document.querySelector('.modal-window');
+      if (win.style.width === '100vw' && win.style.height === '100vh') {
+        win.style.width = '95vw';
+        win.style.height = '92vh';
+        win.style.borderRadius = '14px';
+      } else {
+        win.style.width = '100vw';
+        win.style.height = '100vh';
+        win.style.borderRadius = '0';
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.classList.contains('active')) {
+        closeArchifyModal();
+      }
+    });
+
+    // Copy Code Block Content
+    function copyCode(btn) {
+      const wrapper = btn.closest('.code-wrapper');
+      const pre = wrapper.querySelector('pre');
+      const text = pre.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = '已複製 ✓';
+        btn.style.color = '#10b981';
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.style.color = '';
+        }, 2000);
+      });
+    }
+
+    // Sidebar search filter
+    function filterNav() {
+      const q = document.getElementById('doc-search').value.toLowerCase();
+      const links = document.querySelectorAll('.sidebar-link');
+      links.forEach(l => {
+        const txt = l.textContent.toLowerCase();
+        if (txt.includes(q)) {
+          l.style.display = 'block';
+        } else {
+          l.style.display = 'none';
+        }
+      });
+    }
+
+    // Scrollspy for sidebar active links
+    const sections = document.querySelectorAll('section[id], h3[id]');
+    const navLinks = document.querySelectorAll('.sidebar-link');
+
+    window.addEventListener('scroll', () => {
+      let current = '';
+      sections.forEach(s => {
+        const top = s.offsetTop - 120;
+        if (window.pageYOffset >= top) {
+          current = s.getAttribute('id');
+        }
+      });
+      navLinks.forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href') === '#' + current) {
+          link.classList.add('active');
+        }
+      });
+    });
+  </script>
+</body>
+</html>

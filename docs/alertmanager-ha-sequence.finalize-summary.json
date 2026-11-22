@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "sequence",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/nathan/Project/alertmanager/docs/.archify/sequence-ha-dedup-20261121/candidate.json",
+    "sha256": "b048b0a0914c1b105dc6673da4e9c0dfcd5b533764ba35baf5d709d4dca59d8c",
+    "bytes": 3791
+  },
+  "artifact": {
+    "path": "/home/nathan/Project/alertmanager/docs/alertmanager-ha-sequence.html",
+    "sha256": "d63a6b896b72c4fd0b122483b1a401d25b42a1874155a8b46a92c8e65e0069e7",
+    "bytes": 836845
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/nathan/Project/alertmanager/docs/alertmanager-ha-sequence.finalize.json",
+    "summaryReceipt": "/home/nathan/Project/alertmanager/docs/alertmanager-ha-sequence.finalize-summary.json",
+    "browserCheckReceipt": "/home/nathan/Project/alertmanager/docs/alertmanager-ha-sequence.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-21T04:51:51.427Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3037,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

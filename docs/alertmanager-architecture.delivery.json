@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "51ca33c9-5352-4f66-a89c-243d0310027e",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/nathan/Project/alertmanager/docs/.archify/architecture-alertmanager-rancher-20261121/candidate.json",
+  "output": "/home/nathan/Project/alertmanager/docs/alertmanager-architecture.html",
+  "specification": {
+    "sha256": "6af2556ad7240aa86774b19f27392a2025dda17230cb052a3409fe2c626fce22",
+    "bytes": 5545
+  },
+  "artifact": {
+    "sha256": "3437b5ead488d2bb6c5b87005d9ef9d2abe4660830a2f3fa3c573b53314ea7b2",
+    "bytes": 858580
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/nathan/Project/alertmanager/docs/.archify/architecture-alertmanager-rancher-20261121/candidate.json",
+    "sha256": "6af2556ad7240aa86774b19f27392a2025dda17230cb052a3409fe2c626fce22",
+    "bytes": 5545
+  },
+  "artifact": {
+    "path": "/home/nathan/Project/alertmanager/docs/alertmanager-architecture.html",
+    "sha256": "3437b5ead488d2bb6c5b87005d9ef9d2abe4660830a2f3fa3c573b53314ea7b2",
+    "bytes": 858580
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/nathan/Project/alertmanager/docs/alertmanager-architecture.finalize.json",
+    "summaryReceipt": "/home/nathan/Project/alertmanager/docs/alertmanager-architecture.finalize-summary.json",
+    "browserCheckReceipt": "/home/nathan/Project/alertmanager/docs/alertmanager-architecture.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-21T04:51:51.427Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 2833,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

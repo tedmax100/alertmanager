@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "1d27f822-c638-463b-abdc-fb26f0f0595c",
+  "status": "current",
+  "command": "deliver",
+  "type": "explainer",
+  "input": "/home/nathan/Project/alertmanager/docs/.archify/explainer-alertmanager-20261121/candidate.archify.md",
+  "output": "/home/nathan/Project/alertmanager/docs/alertmanager-rancher-explainer.html",
+  "specification": {
+    "sha256": "5022223bf246b75802ea58286d0fbdf876d7f1972264686e8854fcd66df76231",
+    "bytes": 4254
+  },
+  "artifact": {
+    "sha256": "6a8cef8a1269f04bb73400c1a55e8da2821f251978b0dac0169b2f6565a24c28",
+    "bytes": 930101
+  },
+  "explainer": {
+    "preparedSha256": "8eda710b401c7a30b101b79f2aa7d3bba0fe01a407df49804ab499cbd211d280",
+    "dependencies": [
+      {
+        "kind": "diagram-spec",
+        "id": "alert-flow",
+        "inline": true,
+        "sha256": "a3b235b6f5563ef9543003fee61f800f20b66d1e9ac2032afd67a7f9d60e277c",
+        "bytes": 1436
+      },
+      {
+        "kind": "diagram-spec",
+        "id": "ha-flow",
+        "inline": true,
+        "sha256": "c42a18e601f56e4ab1f34ee5b152686f4f0629667bd6d8846ce5fb819c80afd6",
+        "bytes": 1063
+      }
+    ]
+  }
+}

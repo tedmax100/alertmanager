@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "explainer",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/nathan/Project/alertmanager/docs/.archify/explainer-alertmanager-20261121/candidate.archify.md",
+    "sha256": "5022223bf246b75802ea58286d0fbdf876d7f1972264686e8854fcd66df76231",
+    "bytes": 4254
+  },
+  "artifact": {
+    "path": "/home/nathan/Project/alertmanager/docs/alertmanager-rancher-explainer.html",
+    "sha256": "6a8cef8a1269f04bb73400c1a55e8da2821f251978b0dac0169b2f6565a24c28",
+    "bytes": 930101
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "not-run"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/nathan/Project/alertmanager/docs/alertmanager-rancher-explainer.finalize.json",
+    "summaryReceipt": "/home/nathan/Project/alertmanager/docs/alertmanager-rancher-explainer.finalize-summary.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-11-21T04:51:51.427Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1270,
+  "browserCheck": {
+    "requested": false,
+    "ran": false
+  }
+}
