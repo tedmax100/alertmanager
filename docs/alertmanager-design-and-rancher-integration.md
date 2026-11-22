@@ -88,6 +88,8 @@ silence/           ──> 時間窗口與標籤過濾靜音引擎
 
 ### 2.2 路由樹與匹配器機制 (`dispatch/` & `matcher/`)
 
+> 💡 **互動式架構圖**：本章節提供專屬的 Archify 互動式視覺化：[路由樹遍歷與 Matcher 決策流 (Route Tree)](./alertmanager-route-tree.html)，支援平移縮放、導覽視角與節點點擊高亮。
+
 ```mermaid
 flowchart TD
     In["接收告警 (LabelSet)"] --> Match{"當前節點 Matchers 匹配?"}

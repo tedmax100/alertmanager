@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "1dbc9e9f-a550-4779-83b4-75ad1088ad9f",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/nathan/Project/alertmanager/.archify/architecture-route-tree-matcher-20261122-123805/candidate.json",
+  "output": "/home/nathan/Project/alertmanager/.archify/architecture-route-tree-matcher-20261122-123805/route-tree-matcher.html",
+  "specification": {
+    "sha256": "f139a3958d54329ff0912c779ae5f5d7765e60fb1707d836224b2cca00f85c68",
+    "bytes": 11418
+  },
+  "artifact": {
+    "sha256": "f50feae07f55fa2fe4392a64c527e157751c9c3dc263e18ca1169334ae52598c",
+    "bytes": 861546
+  }
+}

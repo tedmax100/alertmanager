@@ -781,6 +781,7 @@
         <a href="javascript:void(0)" onclick="openArchifyModal('alertmanager-rancher-explainer.html', '單頁互動知識總覽 · Archify Explainer')" class="sidebar-link">🌟 單頁知識總覽 (Explainer)</a>
         <a href="javascript:void(0)" onclick="openArchifyModal('alertmanager-architecture.html', '系統架構互動圖 · Architecture')" class="sidebar-link">📐 系統拓撲圖 (Architecture)</a>
         <a href="javascript:void(0)" onclick="openArchifyModal('alertmanager-ha-sequence.html', 'HA 階梯等待時序圖 · Sequence')" class="sidebar-link">⏱️ HA 階梯時序 (Sequence)</a>
+        <a href="javascript:void(0)" onclick="openArchifyModal('alertmanager-route-tree.html', '路由樹與 Matcher 匹配機制 · Route Tree')" class="sidebar-link">🌲 路由樹決策流 (Route Tree)</a>
       </div>
 
       <div class="sidebar-group">
@@ -915,6 +916,30 @@
                 新分頁開啟 ↗
               </a>
               <button onclick="openArchifyModal('alertmanager-ha-sequence.html', 'HA 階梯等待時序圖 · Sequence')" class="btn-action-secondary">
+                🔍 內嵌預覽
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 4: Route Tree -->
+          <div class="archify-card">
+            <div class="archify-card-top">
+              <div class="archify-card-badges">
+                <span class="badge badge-purple" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">路由樹匹配</span>
+              </div>
+              <div class="archify-card-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                <span>路由樹遍歷與 Matcher 決策流 (Route Tree)</span>
+              </div>
+              <p class="archify-card-desc">
+                探索 LabelSet 深度優先遍歷（DFS）、正則強制起訖錨定 <code>^(?:...)$</code>、<code>continue: true</code> 抄送審計、Fallback 原則與 <code>slot</code> 槽位去重優化。
+              </p>
+            </div>
+            <div class="archify-card-actions">
+              <a href="./alertmanager-route-tree.html" target="_blank" class="btn-action-primary">
+                新分頁開啟 ↗
+              </a>
+              <button onclick="openArchifyModal('alertmanager-route-tree.html', '路由樹與 Matcher 匹配機制 · Route Tree')" class="btn-action-secondary">
                 🔍 內嵌預覽
               </button>
             </div>
@@ -1084,6 +1109,21 @@ flowchart TD
         </p>
 
         <h3 id="sub-2-2">2.2 路由樹與匹配器機制 (<code>dispatch/</code> & <code>matcher/</code>)</h3>
+        <!-- Inline Archify Callout 3: Route Tree -->
+        <div class="archify-inline-callout">
+          <div class="archify-inline-info">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+            <div class="archify-inline-text">
+              <h4>互動式路由樹遍歷與 Matcher 決策流 (Archify Route Tree)</h4>
+              <p>可縮放追蹤 LabelSet 從 Root 執行 DFS 遍歷、正則自動錨定、continue 控制流與 Slot 去重過程。</p>
+            </div>
+          </div>
+          <div class="archify-inline-btns">
+            <a href="./alertmanager-route-tree.html" target="_blank" class="btn-action-primary">在新分頁開啟 ↗</a>
+            <button onclick="openArchifyModal('alertmanager-route-tree.html', '路由樹與 Matcher 匹配機制 · Route Tree')" class="btn-action-secondary">🔍 快速預覽</button>
+          </div>
+        </div>
+
         <div class="mermaid-box">
           <pre class="mermaid">
 flowchart TD

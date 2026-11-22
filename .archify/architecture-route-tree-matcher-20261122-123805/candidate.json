@@ -1,0 +1,381 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Alertmanager 路由樹 (Route Tree) 與 Matcher 匹配機制",
+    "locale": "zh-TW",
+    "output": ".archify/architecture-route-tree-matcher-20261122-123805/route-tree-matcher.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/tedmax100/alertmanager.git",
+      "revision": "c5e71f973187627aa6b5d2b55c7051a08bbb0c1c",
+      "link_mode": "local-only"
+    },
+    "views": [
+      {
+        "id": "overview",
+        "label": "路由決策全景",
+        "focus": [
+          "alert_in",
+          "matcher_engine",
+          "route_root",
+          "dfs_control",
+          "route_audit_slack",
+          "route_team_db",
+          "route_team_api",
+          "fallback_node",
+          "slot_engine",
+          "aggr_group",
+          "rcv_db_oncall",
+          "rcv_slack_audit",
+          "rcv_default"
+        ],
+        "note": "從告警 LabelSet 輸入、Matcher 正則錨定、DFS 遍歷到 Slot 去重與接收端分派的端到端決策流。"
+      },
+      {
+        "id": "matcher_eval",
+        "label": "Matcher 匹配與正則錨定",
+        "focus": [
+          "alert_in",
+          "matcher_engine",
+          "route_root"
+        ],
+        "note": "pkg/labels/matcher.go 編譯時自動加上 ^(?:...)$ 錨點，嚴格禁止非預期前綴模糊命中。"
+      },
+      {
+        "id": "dfs_traversal",
+        "label": "DFS 遍歷與 continue 控制",
+        "focus": [
+          "route_root",
+          "dfs_control",
+          "route_audit_slack",
+          "route_team_db",
+          "route_team_api",
+          "fallback_node"
+        ],
+        "note": "深度優先、由左至右評估子路由；continue: true 允許繼續比對兄弟節點，實作審計抄送。"
+      },
+      {
+        "id": "slot_dedup",
+        "label": "Slot 槽位去重與狀態機",
+        "focus": [
+          "route_team_db",
+          "slot_engine",
+          "aggr_group"
+        ],
+        "note": "具有相同 RouteKey 與 RouteOpts 的路徑合併為單一 slot，避免重複建立 aggrGroup。"
+      },
+      {
+        "id": "receiver_handoff",
+        "label": "接收端分派與 Fallback",
+        "focus": [
+          "route_audit_slack",
+          "route_team_db",
+          "fallback_node",
+          "rcv_db_oncall",
+          "rcv_slack_audit",
+          "rcv_default"
+        ],
+        "note": "各路由繼承或覆蓋配置後指派至專屬 Receiver；若無子節點命中則 Fallback 由根路由承接。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "alert_in",
+      "type": "frontend",
+      "label": "告警輸入 (LabelSet)",
+      "sublabel": "Fingerprint 64-bit 哈希",
+      "icon": "start",
+      "pos": [40, 240],
+      "size": [150, 64],
+      "sources": [
+        { "path": "dispatch/dispatch.go", "line": 319, "label": "matchRoutes 入口" }
+      ]
+    },
+    {
+      "id": "matcher_engine",
+      "type": "security",
+      "label": "Matcher 匹配引擎",
+      "sublabel": "強制錨定 ^(?:...)$",
+      "icon": "decision",
+      "tag": "matcher",
+      "pos": [40, 390],
+      "size": [150, 64],
+      "sources": [
+        { "path": "pkg/labels/matcher.go", "line": 53, "label": "Matcher 定義" },
+        { "path": "pkg/labels/matcher.go", "line": 69, "label": "正則自動起訖錨定" }
+      ]
+    },
+    {
+      "id": "route_root",
+      "type": "backend",
+      "label": "根路由 (Root Route)",
+      "sublabel": "預設 group_wait: 30s",
+      "icon": "neutral",
+      "tag": "route-tree",
+      "pos": [300, 200],
+      "size": [170, 74],
+      "sources": [
+        { "path": "dispatch/route.go", "line": 44, "label": "Route 結構體" },
+        { "path": "dispatch/route.go", "line": 149, "label": "Match(lset) 遍歷" }
+      ]
+    },
+    {
+      "id": "dfs_control",
+      "type": "backend",
+      "label": "DFS 遍歷與控制流",
+      "sublabel": "從左至右深度優先",
+      "icon": "active",
+      "tag": "route-tree",
+      "pos": [300, 390],
+      "size": [170, 80],
+      "sources": [
+        { "path": "dispatch/route.go", "line": 149, "label": "DFS 遍歷演算法" }
+      ]
+    },
+    {
+      "id": "route_audit_slack",
+      "type": "backend",
+      "label": "審計抄送路由",
+      "sublabel": "continue: true",
+      "icon": "messagebus",
+      "tag": "subroute",
+      "pos": [590, 110],
+      "size": [180, 60],
+      "sources": [
+        { "path": "dispatch/route.go", "line": 44, "label": "Route.Continue 欄位" }
+      ]
+    },
+    {
+      "id": "route_team_db",
+      "type": "backend",
+      "label": "子路由: 資料庫團隊",
+      "sublabel": "match: team=database",
+      "icon": "database",
+      "tag": "subroute",
+      "pos": [590, 220],
+      "size": [180, 60],
+      "sources": [
+        { "path": "dispatch/route.go", "line": 149, "label": "子節點匹配" }
+      ]
+    },
+    {
+      "id": "route_team_api",
+      "type": "backend",
+      "label": "子路由: 核心 API",
+      "sublabel": "match: service=~api.*",
+      "icon": "cloud",
+      "tag": "subroute",
+      "pos": [590, 340],
+      "size": [180, 60],
+      "sources": [
+        { "path": "pkg/labels/matcher.go", "line": 69, "label": "正則前綴匹配" }
+      ]
+    },
+    {
+      "id": "fallback_node",
+      "type": "cloud",
+      "label": "Fallback 回退節點",
+      "sublabel": "子節點未命中時由父承接",
+      "icon": "neutral",
+      "tag": "subroute",
+      "pos": [590, 540],
+      "size": [180, 60],
+      "sources": [
+        { "path": "dispatch/route.go", "line": 149, "label": "Fallback 原則" }
+      ]
+    },
+    {
+      "id": "slot_engine",
+      "type": "database",
+      "label": "Slot 槽位去重器",
+      "sublabel": "合併相同 RouteOpts",
+      "icon": "database",
+      "tag": "dispatch-opt",
+      "pos": [890, 340],
+      "size": [170, 64],
+      "sources": [
+        { "path": "dispatch/dispatch.go", "line": 102, "label": "type slot 結構體" },
+        { "path": "dispatch/dispatch.go", "line": 319, "label": "matchRoutes 槽位去重" }
+      ]
+    },
+    {
+      "id": "aggr_group",
+      "type": "messagebus",
+      "label": "aggrGroup 聚合狀態機",
+      "sublabel": "GroupKey = RouteKey:GroupBy",
+      "icon": "active",
+      "tag": "dispatch-opt",
+      "pos": [890, 440],
+      "size": [170, 64],
+      "sources": [
+        { "path": "dispatch/dispatch.go", "line": 56, "label": "Dispatcher 聚合群組" }
+      ]
+    },
+    {
+      "id": "rcv_slack_audit",
+      "type": "external",
+      "label": "Slack 審計頻道",
+      "sublabel": "全量抄送與通知追蹤",
+      "icon": "messagebus",
+      "pos": [1180, 110],
+      "size": [160, 60],
+      "sources": [
+        { "path": "notify/slack/types.go", "line": 27, "label": "Slack Notifier" }
+      ]
+    },
+    {
+      "id": "rcv_db_oncall",
+      "type": "external",
+      "label": "DB 值班手機 (Pager)",
+      "sublabel": "Critical 立即呼叫",
+      "icon": "person",
+      "pos": [1180, 220],
+      "size": [160, 60],
+      "sources": [
+        { "path": "notify/pagerduty/pagerduty.go", "line": 46, "label": "PagerDuty Notifier" }
+      ]
+    },
+    {
+      "id": "rcv_default",
+      "type": "external",
+      "label": "預設 Slack 接收端",
+      "sublabel": "Fallback 未命中時承接",
+      "icon": "neutral",
+      "pos": [1180, 540],
+      "size": [160, 60],
+      "sources": [
+        { "path": "notify/slack/types.go", "line": 27, "label": "Slack Notifier" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Route Tree 路由樹結構與遍歷 (dispatch/route.go)",
+      "wraps": [
+        "route_root",
+        "dfs_control",
+        "route_audit_slack",
+        "route_team_db",
+        "route_team_api",
+        "fallback_node"
+      ],
+      "pad": 18
+    },
+    {
+      "kind": "security-group",
+      "label": "Slot 槽位去重與分組優化 (dispatch/dispatch.go)",
+      "wraps": [
+        "slot_engine",
+        "aggr_group"
+      ],
+      "pad": 16
+    }
+  ],
+  "connections": [
+    {
+      "from": "alert_in",
+      "to": "matcher_engine",
+      "label": "提取 LabelSet",
+      "variant": "default"
+    },
+    {
+      "from": "matcher_engine",
+      "to": "route_root",
+      "label": "正則錨定比對",
+      "variant": "security"
+    },
+    {
+      "from": "route_root",
+      "to": "route_audit_slack",
+      "label": "continue: true 抄送",
+      "variant": "emphasis"
+    },
+    {
+      "from": "route_root",
+      "to": "route_team_db",
+      "label": "命中並中斷同層",
+      "variant": "emphasis"
+    },
+    {
+      "from": "route_root",
+      "to": "dfs_control",
+      "label": "DFS 遍歷子路由",
+      "variant": "emphasis"
+    },
+    {
+      "from": "dfs_control",
+      "to": "route_team_api",
+      "label": "前綴匹配 service=~api.*",
+      "variant": "default"
+    },
+    {
+      "from": "dfs_control",
+      "to": "fallback_node",
+      "label": "子節點皆未命中",
+      "variant": "dashed"
+    },
+    {
+      "from": "route_audit_slack",
+      "to": "rcv_slack_audit",
+      "label": "發送審計通知",
+      "variant": "default"
+    },
+    {
+      "from": "route_team_db",
+      "to": "rcv_db_oncall",
+      "label": "分派專屬 Receiver",
+      "variant": "security"
+    },
+    {
+      "from": "route_team_api",
+      "to": "slot_engine",
+      "label": "繼承與覆蓋 RouteOpts",
+      "variant": "emphasis"
+    },
+    {
+      "from": "slot_engine",
+      "to": "aggr_group",
+      "label": "計算 GroupKey 分組",
+      "variant": "emphasis"
+    },
+    {
+      "from": "fallback_node",
+      "to": "rcv_default",
+      "label": "Root 預設 Receiver",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Matcher 匹配底層原理與錨定防坑",
+      "items": [
+        "位於 pkg/labels/matcher.go，支援 =、!=、=~、!~ 四種比對運算子",
+        "正則編譯時強制套用錨點 ^(?:...)$，例如 service =~ \"api\" 僅精確匹配 \"api\"，絕不會模糊命中 \"api-gateway\"",
+        "未定義的標籤（Absent Labels）在比對時視同空字串 \"\"，因此 env = \"\" 可精準匹配未設置 env 標籤的告警"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Route Tree DFS 遍歷與 continue 控制流",
+      "items": [
+        "從根路由（Root）由上到下、由左至右執行深度優先遍歷（DFS）",
+        "預設子節點匹配後會中斷同層後續搜尋（continue: false），直接進入子樹或完成路由",
+        "若啟用 continue: true，匹配後允許繼續比對同層兄弟節點，這是實作「主告警送至 PagerDuty，同時抄送 Slack 稽核頻道」的核心配置",
+        "Fallback 原則：若無任何子節點匹配，自動回退由當前父節點或 Root 本身承接處理"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Slot 槽位去重與記憶體狀態機優化",
+      "items": [
+        "位於 dispatch/dispatch.go:102，定義 type slot 結構體",
+        "若多條匹配路由具有完全相同的 RouteKey 與 RouteOpts（RouteOpts.equal），Dispatcher 會將它們歸納到同一個內部 slot 物件",
+        "相同 slot 共享相同的聚合群組，避免同一次告警重複建立多餘的 aggrGroup 狀態機，大幅降低記憶體負載"
+      ]
+    }
+  ]
+}
