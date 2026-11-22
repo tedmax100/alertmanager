@@ -34,9 +34,9 @@ flowchart TD
             AM1["Alertmanager Pod 0<br/>(Position 0)"]
             AM2["Alertmanager Pod 1<br/>(Position 1)"]
             AM3["Alertmanager Pod 2<br/>(Position 2)"]
-            AM1 <-->|Gossip :9094| AM2
-            AM2 <-->|Gossip :9094| AM3
-            AM3 <-->|Gossip :9094| AM1
+            AM1 <-->|"Gossip :9094"| AM2
+            AM2 <-->|"Gossip :9094"| AM3
+            AM3 <-->|"Gossip :9094"| AM1
         end
     end
 
@@ -47,18 +47,18 @@ flowchart TD
         Email["Email / Mail Server"]
     end
 
-    P1 -->|POST /api/v2/alerts (多播直連)| AM1
-    P1 -->|POST /api/v2/alerts (多播直連)| AM2
-    P1 -->|POST /api/v2/alerts (多播直連)| AM3
+    P1 -->|"POST /api/v2/alerts (多播直連)"| AM1
+    P1 -->|"POST /api/v2/alerts (多播直連)"| AM2
+    P1 -->|"POST /api/v2/alerts (多播直連)"| AM3
 
-    P2 -->|POST /api/v2/alerts (多播直連)| AM1
-    P2 -->|POST /api/v2/alerts (多播直連)| AM2
-    P2 -->|POST /api/v2/alerts (多播直連)| AM3
+    P2 -->|"POST /api/v2/alerts (多播直連)"| AM1
+    P2 -->|"POST /api/v2/alerts (多播直連)"| AM2
+    P2 -->|"POST /api/v2/alerts (多播直連)"| AM3
 
-    AM1 -.->|0s 立即發送並廣播 nflog| Slack
-    AM2 -.->|15s 等待後靜默去重| PD
-    AM3 -.->|30s 等待後靜默去重| Webhook
-    AM1 -.->|0s 立即發送並廣播 nflog| Email
+    AM1 -.->|"0s 立即發送並廣播 nflog"| Slack
+    AM2 -.->|"15s 等待後靜默去重"| PD
+    AM3 -.->|"30s 等待後靜默去重"| Webhook
+    AM1 -.->|"0s 立即發送並廣播 nflog"| Email
 ```
 
 ---
